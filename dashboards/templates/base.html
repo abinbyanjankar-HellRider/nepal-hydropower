@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Nepal Hydropower{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<header class="top"><div class="inner">
+  <a class="brand" href="/">Nepal Hydropower</a>
+  <nav>
+    {% for href, label in [('/', 'Overview'), ('/map', 'Map'), ('/projects', 'Projects'), ('/companies', 'Companies'), ('/news', 'News'), ('/analytics', 'Analytics')] %}
+    <a href="{{ href }}" class="{{ 'active' if request.path == href or (href != '/' and request.path.startswith(href)) else '' }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+</div></header>
+<main>{% block content %}{% endblock %}</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

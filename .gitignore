@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.env
+data/*.db
+data/raw/
+data/processed/
+data/reports/
+data/*.log
+data/stage*.sh
+exports/generated/

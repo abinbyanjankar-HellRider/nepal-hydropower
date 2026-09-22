@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Companies · Nepal Hydropower{% endblock %}
+{% block content %}
+<style>#table td:nth-child(2) { min-width: 230px; } #table td:first-child { white-space: nowrap; }</style>
+<h1>Companies</h1>
+<p class="sub">Listed hydropower companies with their projects by stage and the key terms behind them. Financials come from ShareSansar's latest quarterly report; a dash means not available. Hover a cost-per-MW or tax cell for how it was derived. Click a column to sort.</p>
+<form class="filters" id="f">
+  <label>Search<input name="q" placeholder="name or symbol"></label>
+  <label>Show<select name="scope"><option value="listed">NEPSE-listed only</option><option value="all">Also unlisted developers</option></select></label>
+  <label><span>&nbsp;</span><span><input type="checkbox" id="only-debt"> with loans only</span></label>
+</form>
+<div class="card"><div id="count" class="sub" style="margin-bottom:8px"></div><div id="table"></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let rows = [], sortKey = "operational_mw", sortDir = "desc";
+const f = document.getElementById("f");
+function taxCell(r) {
+  const t = r.tax || "Unknown";
+  return el("span", { title: r.effective_tax_rate_pct !== null ? "Effective tax rate " + r.effective_tax_rate_pct + "% (inferred from reported tax provision)" : "No profit data to infer from" },
+            t, r.effective_tax_rate_pct !== null ? el("small", { style: "color:var(--muted)" }, " " + fmt(r.effective_tax_rate_pct, 1) + "%") : null);
+}
+const cols = [
+  { label: "Symbol", sort: "symbol", render: r => r.symbol || "–" },
+  { label: "Company", sort: "name", render: r => el("a", { href: "/companies/" + r.company_id }, r.name) },
+  { label: "Operating MW", num: true, sort: "operational_mw", render: r => fmt(r.operational_mw, 1) },
+  { label: "Building MW", num: true, sort: "construction_mw", render: r => fmt(r.construction_mw, 1) },
+  { label: "Licensed MW", num: true, sort: "licensed_mw", render: r => fmt(r.licensed_mw, 1) },
+  { label: "Planned MW", num: true, sort: "planned_mw", render: r => fmt(r.planned_mw, 1) },
+  { label: "Cost / MW (NPR)", num: true, sort: "cost_per_mw_npr", render: r => el("span", { title: r.cost_per_mw_basis || "" }, npr(r.cost_per_mw_npr)) },
+  { label: "PPA (NPR/kWh)", num: true, sort: "ppa_rate", render: r => r.ppa_text ? el("span", { title: r.ppa_text }, fmt(r.ppa_rate, 2)) : "–" },
+  { label: "Tax", sort: "tax", render: taxCell },
+  { label: "Loans (NPR)", num: true, sort: "loans_npr", render: r => npr(r.loans_npr) },
+  { label: "Finance cost (NPR)", num: true, sort: "finance_cost_npr", render: r => npr(r.finance_cost_npr) },
+  { label: "Debt / equity", num: true, sort: "debt_to_equity", render: r => r.debt_to_equity === null ? "–" : fmt(r.debt_to_equity, 2) },
+  { label: "Latest profit YoY", num: true, sort: "profit_yoy_pct", render: r => (r.profit_yoy_pct === null || r.profit_yoy_pct === undefined) ? "–" :
+      el("span", { title: "Year-to-date net profit, " + r.latest_period + ", vs the same period last year", style: "color:" + (r.profit_yoy_pct >= 0 ? "#1a9e6b" : "#c2453d") }, (r.profit_yoy_pct >= 0 ? "+" : "") + fmt(r.profit_yoy_pct, 1) + "%") },
+];
+function draw() {
+  const q = f.q.value.trim().toLowerCase();
+  const view = rows.filter(r => (!q || (r.name + " " + (r.symbol || "")).toLowerCase().includes(q)) &&
+                                (!document.getElementById("only-debt").checked || (r.loans_npr || 0) > 0));
+  view.sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x === null || x === undefined) return 1;
+    if (y === null || y === undefined) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * (sortDir === "asc" ? 1 : -1);
+  });
+  document.getElementById("count").textContent = view.length + " companies";
+  renderTable(document.getElementById("table"), cols, view, { sortKey, sortDir, empty: "No matching companies.",
+    onSort: k => { sortDir = (sortKey === k && sortDir === "desc") ? "asc" : "desc"; sortKey = k; draw(); } });
+}
+async function load() {
+  try { rows = await api("/api/companies/profiles", { scope: f.scope.value }); draw(); }
+  catch (e) { showError(document.getElementById("table"), e); }
+}
+f.addEventListener("submit", e => e.preventDefault());
+f.q.addEventListener("input", draw);
+f.scope.addEventListener("change", load);
+document.getElementById("only-debt").addEventListener("change", draw);
+load();
+</script>
+{% endblock %}

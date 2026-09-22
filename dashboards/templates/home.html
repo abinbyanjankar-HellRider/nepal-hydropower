@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Overview · Nepal Hydropower{% endblock %}
+{% block content %}
+<h1>Nepal hydropower overview</h1>
+<p class="sub">Projects from DoED licence registers, cross-checked against Wikipedia. Capacity is licensed/installed MW as reported by the source.</p>
+
+<div class="grid kpis" id="kpis"></div>
+
+<div class="grid two">
+  <div class="card"><h2>Capacity by stage (MW)</h2><div class="chart-box"><canvas id="c-status"></canvas></div></div>
+  <div class="card"><h2>Operational capacity by province (MW)</h2><div class="chart-box"><canvas id="c-province"></canvas></div></div>
+  <div class="card"><h2>Operational capacity added per year (MW) and cumulative</h2><div class="chart-box"><canvas id="c-timeline"></canvas></div></div>
+  <div class="card"><h2>Largest operational plants (MW)</h2><div class="chart-box"><canvas id="c-top"></canvas></div></div>
+</div>
+
+<div class="card" style="margin-top:16px"><h2>Latest news mentioning tracked projects</h2><ul class="news" id="news"></ul></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+(async () => {
+  try {
+    const s = await api("/api/projects/statistics");
+    const sm = s.summary;
+    const kpi = (label, value, note, color) => el("div", { class: "card kpi" },
+      el("div", { class: "label" }, color ? el("span", { class: "dot", style: "background:" + color }) : null, label),
+      el("div", { class: "value" }, value), el("div", { class: "note" }, note || ""));
+    document.getElementById("kpis").append(
+      kpi("Operational", fmt(sm.operational_mw) + " MW", fmt(sm.operational_projects) + " plants", STATUS_COLORS["Operational"]),
+      kpi("Under construction", fmt(sm.under_construction_mw) + " MW", "per Wikipedia list", STATUS_COLORS["Under Construction"]),
+      kpi("Licensed", fmt(sm.licensed_mw) + " MW", "generation licence, construction not confirmed", STATUS_COLORS["Licensed"]),
+      kpi("Planned", fmt(sm.planned_mw) + " MW", "survey licence / proposals", STATUS_COLORS["Planned"]),
+      kpi("Projects tracked", fmt(sm.projects), "all stages"));
+
+    new Chart("c-status", { type: "doughnut",
+      data: { labels: s.by_status.map(r => r.group), datasets: [{ data: s.by_status.map(r => r.total_mw),
+              backgroundColor: s.by_status.map(r => STATUS_COLORS[r.group] || "#999") }] },
+      options: baseChartOptions({ plugins: { legend: { position: "right" } } }) });
+    new Chart("c-province", { type: "bar",
+      data: { labels: s.operational_by_province.map(r => r.group), datasets: [{ data: s.operational_by_province.map(r => r.total_mw), backgroundColor: STATUS_COLORS["Operational"] }] },
+      options: baseChartOptions({ plugins: { legend: { display: false } } }) });
+    new Chart("c-timeline", { data: { labels: s.timeline.map(r => r.year), datasets: [
+        { type: "bar", label: "MW added", data: s.timeline.map(r => r.mw_added), backgroundColor: STATUS_COLORS["Operational"], yAxisID: "y" },
+        { type: "line", label: "Cumulative MW", data: s.timeline.map(r => r.cumulative_mw), borderColor: "#14507a", yAxisID: "y1", pointRadius: 0 }] },
+      options: baseChartOptions({ scales: { y: { position: "left" }, y1: { position: "right", grid: { drawOnChartArea: false } } } }) });
+    new Chart("c-top", { type: "bar",
+      data: { labels: s.top_operational.map(r => r.name), datasets: [{ data: s.top_operational.map(r => r.capacity_mw), backgroundColor: STATUS_COLORS["Operational"] }] },
+      options: baseChartOptions({ indexAxis: "y", plugins: { legend: { display: false } } }) });
+  } catch (e) { showError(document.getElementById("kpis"), e); }
+
+  const news = document.getElementById("news");
+  try {
+    const items = await api("/api/news");
+    if (!items.length) news.append(el("li", { class: "empty" }, "No news yet. Run `python main.py update-news`."));
+    items.slice(0, 8).forEach(n => news.append(el("li", {},
+      el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title), " ",
+      el("small", {}, `${n.source} · ${n.date} · `), projectLink(n.project_id, n.project))));
+  } catch (e) { news.append(el("li", { class: "empty" }, "Could not load news.")); }
+})();
+</script>
+{% endblock %}

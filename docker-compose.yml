@@ -1,0 +1,7 @@
+services:
+  hydropower:
+    build: .
+    ports: ["5000:5000"]
+    volumes: ["./data:/app/data"]   # keeps the database between runs
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}   # leave empty to disable POST /api/projects/add

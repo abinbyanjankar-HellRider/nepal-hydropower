@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Projects · Nepal Hydropower{% endblock %}
+{% block content %}
+<h1>Projects</h1>
+<p class="sub">Search and filter every tracked project. Click a column to sort.</p>
+<form class="filters" id="filters">
+  <label>Name<input name="q" placeholder="e.g. Tamakoshi"></label>
+  <label>Developer<input name="developer" placeholder="company name"></label>
+  <label>NEPSE symbol<input name="symbol" size="8" placeholder="CHCL"></label>
+  <label>Stage<select name="status"><option value="">All</option>{% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
+  <label>Province<select name="province"><option value="">All</option>
+    {% for p in ['Koshi','Madhesh','Bagmati','Gandaki','Lumbini','Karnali','Sudurpashchim'] %}<option>{{ p }}</option>{% endfor %}</select></label>
+  <label>Min MW<input name="capacity_min" type="number" step="any" size="6" style="width:90px"></label>
+  <label>Max MW<input name="capacity_max" type="number" step="any" style="width:90px"></label>
+  <button type="submit">Apply</button>
+  <button type="button" class="ghost" id="reset">Reset</button>
+  <a href="/api/export/excel?format=master" class="ghost" style="margin-left:auto">Download Excel</a>
+</form>
+<div class="card">
+  <div id="count" class="sub" style="margin-bottom:8px"></div>
+  <div id="table"></div>
+  <div class="pager"><button class="ghost" id="prev">Prev</button><span id="page"></span><button class="ghost" id="next">Next</button></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const PAGE = 50;
+const state = { offset: 0, sort: "capacity_mw", order: "desc" };
+const form = document.getElementById("filters");
+
+function params() {
+  const p = { limit: PAGE, offset: state.offset, sort: state.sort, order: state.order };
+  new FormData(form).forEach((v, k) => { if (v) p[k] = v; });
+  return p;
+}
+const columns = [
+  { label: "ID", key: "project_id" },
+  { label: "Name", sort: "name", render: r => projectLink(r.project_id, r.name) },
+  { label: "MW", num: true, sort: "capacity_mw", render: r => fmt(r.capacity_mw, 2) },
+  { label: "Stage", sort: "status", render: r => statusPill(r.status) },
+  { label: "District", sort: "district", key: "district" },
+  { label: "Developer", sort: "developer", render: r => el("span", {}, r.developer || "–", r.symbol ? el("small", { class: "warn", style: "color:var(--accent)" }, " " + r.symbol) : null) },
+  { label: "COD", num: true, sort: "commissioning_year", render: r => r.commissioning_year || r.expected_completion_year ? (r.commissioning_year || "exp. " + r.expected_completion_year) : "–" },
+];
+async function load() {
+  const target = document.getElementById("table");
+  try {
+    const res = await api("/api/projects", params());
+    renderTable(target, columns, res.items, { sortKey: state.sort, sortDir: state.order,
+      onSort: key => { state.order = (state.sort === key && state.order === "desc") ? "asc" : "desc"; state.sort = key; state.offset = 0; load(); } });
+    document.getElementById("count").textContent = `${fmt(res.total)} projects`;
+    document.getElementById("page").textContent = res.total ? `${state.offset + 1}–${Math.min(state.offset + PAGE, res.total)} of ${fmt(res.total)}` : "";
+    document.getElementById("prev").disabled = state.offset === 0;
+    document.getElementById("next").disabled = state.offset + PAGE >= res.total;
+  } catch (e) { showError(target, e); }
+}
+form.addEventListener("submit", e => { e.preventDefault(); state.offset = 0; load(); });
+document.getElementById("reset").addEventListener("click", () => { form.reset(); state.offset = 0; load(); });
+document.getElementById("prev").addEventListener("click", () => { state.offset = Math.max(0, state.offset - PAGE); load(); });
+document.getElementById("next").addEventListener("click", () => { state.offset += PAGE; load(); });
+const preset = new URLSearchParams(location.search);
+preset.forEach((v, k) => { if (form.elements[k]) form.elements[k].value = v; });
+load();
+</script>
+{% endblock %}

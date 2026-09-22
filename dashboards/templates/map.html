@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Map · Nepal Hydropower{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">{% endblock %}
+{% block content %}
+<h1>Project map</h1>
+<p class="sub" id="map-note">Circle size scales with capacity. Coordinates are the midpoint of the licence area reported by DoED, so they are approximate.</p>
+<div class="legend" id="legend"></div>
+<div id="map"></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script>
+const map = L.map("map").setView([28.3, 84.1], 7);
+const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+let tileErrors = 0;
+tiles.on("tileerror", () => {
+  if (++tileErrors === 3)  // the base map comes from openstreetmap.org; markers are served locally and still work
+    document.getElementById("map-note").append(el("div", { class: "warn" },
+      "Base-map tiles could not be loaded (openstreetmap.org unreachable?). Project markers are still shown."));
+});
+const layers = {};
+const radius = mw => Math.max(4, Math.min(22, 3 + Math.sqrt(mw || 0) * 0.9));
+
+async function load() {
+  const data = await api("/api/geojson");
+  const counts = {};
+  data.features.forEach(f => {
+    const p = f.properties; counts[p.status] = (counts[p.status] || 0) + 1;
+    const m = L.circleMarker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {
+      radius: radius(p.capacity_mw), color: "#fff", weight: 1, fillColor: STATUS_COLORS[p.status] || "#999", fillOpacity: .8 });
+    const box = el("div", {}, el("strong", {}, p.name), el("br"),
+      `${fmt(p.capacity_mw, 1)} MW · ${p.status}`, el("br"), p.district || "", p.developer ? " · " + p.developer : "", el("br"),
+      el("a", { href: "/projects/" + encodeURIComponent(p.project_id) }, "Details"));
+    m.bindPopup(box);
+    (layers[p.status] = layers[p.status] || L.layerGroup()).addLayer(m);
+  });
+  const legend = document.getElementById("legend");
+  Object.keys(STATUS_COLORS).filter(s => layers[s]).forEach(s => {
+    layers[s].addTo(map);
+    const cb = el("input", { type: "checkbox", checked: "checked" });
+    cb.addEventListener("change", () => cb.checked ? layers[s].addTo(map) : map.removeLayer(layers[s]));
+    legend.append(el("label", {}, cb, el("span", { class: "dot", style: "background:" + STATUS_COLORS[s] }), `${s} (${counts[s]})`));
+  });
+  document.getElementById("map-note").append(` ${data.features.length} projects have coordinates.`);
+}
+load().catch(e => showError(document.getElementById("legend"), e));
+</script>
+{% endblock %}

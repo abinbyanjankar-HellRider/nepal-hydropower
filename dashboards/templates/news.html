@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}News · Nepal Hydropower{% endblock %}
+{% block content %}
+<h1>News</h1>
+<p class="sub">From Online Khabar, The Rising Nepal and Kathmandu Post RSS feeds, matched by name to tracked projects and to NEPSE-listed hydropower companies (by company name or stock symbol). Run <code>python main.py update-news</code> to refresh. Not comprehensive — only what these feeds published and this matching could identify.</p>
+<form class="filters" id="f">
+  <label>Search<input name="q" placeholder="title, project or company"></label>
+</form>
+<div class="grid two">
+  <div class="card">
+    <h2>Hydropower project news</h2>
+    <ul class="news" id="project-news"></ul>
+  </div>
+  <div class="card">
+    <h2>NEPSE-listed company news</h2>
+    <ul class="news" id="company-news"></ul>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let items = [];
+const f = document.getElementById("f");
+
+function renderList(container, rows) {
+  container.replaceChildren();
+  if (!rows.length) { container.append(el("li", { class: "empty" }, "No matching news.")); return; }
+  rows.forEach(n => container.append(el("li", {},
+    el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title), " ",
+    el("small", {}, `${n.source} · ${n.date} · `),
+    n.project_id ? projectLink(n.project_id, n.project) : null,
+    n.project_id && n.company_id ? " · " : null,
+    n.company_id ? companyLink(n.company_id, n.company + (n.company_symbol ? " (" + n.company_symbol + ")" : "")) : null)));
+}
+
+function draw() {
+  const q = f.q.value.trim().toLowerCase();
+  const match = n => !q || [n.title, n.project, n.company, n.company_symbol].filter(Boolean).join(" ").toLowerCase().includes(q);
+  renderList(document.getElementById("project-news"), items.filter(n => n.project_id && match(n)));
+  renderList(document.getElementById("company-news"), items.filter(n => n.company_id && match(n)));
+}
+
+(async () => {
+  try { items = await api("/api/news", { limit: 200 }); draw(); }
+  catch (e) {
+    const msg = el("li", { class: "empty" }, "Could not load news: " + e.message);
+    document.getElementById("project-news").append(msg);
+    document.getElementById("company-news").append(msg.cloneNode(true));
+  }
+})();
+f.addEventListener("submit", e => e.preventDefault());
+f.q.addEventListener("input", draw);
+</script>
+{% endblock %}

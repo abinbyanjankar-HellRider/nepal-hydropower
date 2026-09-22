@@ -1,0 +1,4 @@
+symbol,project_id,fact_type,value_num,value_text,unit,fiscal_year,source
+UPPER,HP_001,ppa_wet_npr_kwh,3.63,,NPR/kWh,2080/81,"ICRA Nepal rating report on Upper Tamakoshi Hydropower Ltd (20 May 2024), p.2: wet season (mid-April to mid-December) tariff NPR 3.63 per kWh. https://www.icranepal.com/wp-content/uploads/2024/05/A.689-Upper-Tamakoshi-Hydropower-Limited_IR-Surveillance_May-20-2024_Final.pdf"
+UPPER,HP_001,ppa_dry_npr_kwh,6.96,,NPR/kWh,2080/81,"ICRA Nepal rating report on Upper Tamakoshi Hydropower Ltd (20 May 2024), p.2: dry season tariff NPR 6.96 per kWh (the report gives 6.96 again for the fully escalated dry rate, so treat the dry figure with care)."
+UPPER,HP_001,ppa_escalation,,"PPA allows 3% annual escalation for nine years after COD; wet rate fully escalated to NPR 4.74 after FY2031 (ICRA report p.2).",,2080/81,"ICRA Nepal rating report (20 May 2024), p.2"

@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% block title %}Company · Nepal Hydropower{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">{% endblock %}
+{% block content %}
+<p class="sub"><a href="/companies">&larr; All companies</a></p>
+<h1 id="title">Company</h1>
+<p class="sub" id="subtitle"></p>
+<div class="grid kpis" id="kpis"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin:-4px 0 12px"><button type="button" class="ghost" id="expand-all">Expand all</button><button type="button" class="ghost" id="collapse-all">Collapse all</button></div>
+<div class="grid two">
+  <div class="card"><h2>Key terms</h2><dl class="props" id="terms"></dl></div>
+  <div class="card"><h2>Outlook: what the pipeline could add <small class="warn">scenario, not a valuation</small></h2>
+    <dl class="props" id="future"></dl><p class="sub" id="future-note" style="margin-top:10px;font-size:13px"></p></div>
+</div>
+<details class="card fold" open style="margin-top:16px">
+  <summary><h2>Latest news</h2><span class="hint" id="news-hint"></span></summary>
+  <div class="fold-body"><ul class="news" id="company-news"></ul></div>
+</details>
+<details class="card fold" open style="margin-top:16px">
+  <summary><h2>Latest quarterly report analysis</h2><span class="hint" id="latest-period"></span></summary>
+  <div class="fold-body"><div class="grid two"><div id="latest-table"></div><div><ul id="latest-bullets" class="news"></ul><p id="latest-note" class="sub" style="font-size:12px"></p></div></div></div>
+</details>
+<details class="card fold" open style="margin-top:16px" id="map-fold">
+  <summary><h2>Map: where the projects are</h2><span class="hint" id="map-hint"></span></summary>
+  <div class="fold-body"><div class="grid two">
+    <div><div id="cmap" style="height:400px;border-radius:8px;background:#dfe6ec"></div><div class="legend" id="cmap-legend" style="margin-top:8px"></div></div>
+    <div><h3 style="margin:0 0 6px;font-size:14px">By ecological belt</h3><div id="geo-belt"></div>
+      <h3 style="margin:14px 0 6px;font-size:14px">By province</h3><div id="geo-province"></div>
+      <p class="sub" id="geo-note" style="font-size:12px;margin-top:10px"></p></div>
+  </div></div>
+</details>
+<details class="card fold" style="margin-top:16px">
+  <summary><h2>Quarterly net profit: current fiscal year vs previous years</h2><span class="hint" id="quarters-hint"></span></summary>
+  <div class="fold-body"><div class="filters" style="margin-bottom:6px"><label>Show<select id="qmode"><option value="standalone_npr">Standalone quarter</option><option value="ytd_npr">Cumulative (year to date)</option></select></label></div>
+  <div class="chart-box"><canvas id="c-quarters"></canvas></div><div id="qtable" style="margin-top:12px"></div>
+  <p id="trend-note" class="sub" style="font-size:12px;margin-top:8px"></p></div>
+</details>
+<details class="card fold" style="margin-top:16px">
+  <summary><h2>Last five fiscal years: profit and key ratios</h2><span class="hint" id="annual-hint"></span></summary>
+  <div class="fold-body"><div id="annual"></div>
+  <p class="sub" style="font-size:12px;margin-top:8px">Net profit comes from each quarter's results announcement (a year still in progress is marked "so far"). Sales, finance cost, loans and ratios appear only for years with a stored full report (ShareSansar publishes just the latest; earlier years can be loaded with <code>import-csv --kind company-financials</code>). The column "% of today's paid-up capital" divides each year's profit by the current capital, so older years look smaller than they were per share at the time if bonus or right shares were issued.</p></div>
+</details>
+<div id="stages"></div>
+<details class="card fold" style="margin-top:16px">
+  <summary><h2>Reported results by quarter (year to date)</h2><span class="hint" id="hist-hint"></span></summary>
+  <div class="fold-body"><div class="chart-box"><canvas id="c-hist"></canvas></div><div id="hist" style="margin-top:12px"></div></div>
+</details>
+<details class="card fold" style="margin-top:16px">
+  <summary><h2>Reports</h2><span class="hint" id="reports-hint"></span></summary>
+  <div class="fold-body"><div id="reports" style="max-height:460px;overflow:auto"></div></div>
+</details>
+<details class="card fold" style="margin-top:16px">
+  <summary><h2>Facts read from reports <small class="warn">unverified candidates</small></h2><span class="hint" id="facts-hint"></span></summary>
+  <div class="fold-body"><div id="facts" style="max-height:460px;overflow:auto"></div></div>
+</details>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script>
+const row = (dl, k, v, note) => {
+  dl.append(el("dt", {}, k), el("dd", {}, v, note ? el("div", { class: "sub", style: "font-size:12px;margin:0" }, note) : null));
+};
+const dash = (v, f) => (v === null || v === undefined) ? "–" : f(v);
+(async () => {
+  let p;
+  try { p = await api("/api/companies/{{ company_id }}/profile"); }
+  catch (e) { showError(document.getElementById("terms"), e); return; }
+  const c = p.company, m = p.metrics, fu = p.future;
+  document.title = c.name + " · Nepal Hydropower";
+  document.getElementById("title").textContent = c.name + (c.symbol ? "  (" + c.symbol + ")" : "");
+  const sub = document.getElementById("subtitle");
+  sub.append(c.listed ? "NEPSE-listed hydropower company" : "Unlisted developer / promoter");
+  if (c.website) sub.append(" · ", el("a", { href: c.website, target: "_blank", rel: "noopener noreferrer" }, c.website));
+  if (c.address) sub.append(" · " + c.address);
+
+  const newsList = document.getElementById("company-news");
+  if (!p.news.length) newsList.append(el("li", { class: "empty" }, "No news matched yet. Run `python main.py update-news`."));
+  else p.news.slice(0, 10).forEach(n => newsList.append(el("li", {},
+    el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title), " ",
+    el("small", {}, `${n.source} · ${n.date}` + (n.project_id ? " · " : "")),
+    n.project_id ? projectLink(n.project_id, n.project) : null)));
+  document.getElementById("news-hint").textContent = p.news.length ? p.news.length + " item(s)" : "none";
+
+  const kpi = (label, v, color) => el("div", { class: "card kpi" },
+    el("div", { class: "label" }, el("span", { class: "dot", style: "background:" + color }), label),
+    el("div", { class: "value" }, fmt(v, 1) + " MW"));
+  document.getElementById("kpis").append(...["Operational", "Under Construction", "Licensed", "Planned"].map(s => kpi(s, p.portfolio.mw[s], STATUS_COLORS[s])));
+
+  const t = document.getElementById("terms"), cpm = m.cost_per_mw;
+  row(t, "Project cost per MW", cpm ? "NPR " + npr(cpm.npr) : "–", cpm ? cpm.basis : (m.cost_per_mw_note || "No project cost on record and no financials to derive a proxy from."));
+  const cand = m.ppa_candidate, ppa = m.ppa_rate;
+  row(t, "PPA rate", ppa ? ppa.text : "–",
+      ppa ? "verified from a report (page " + (ppa.source.page || "?") + "): " + (ppa.source.snippet || "") + (ppa.escalation ? " " + ppa.escalation : "") + (ppa.blend_note ? " (" + ppa.blend_note + ")" : "") :
+      cand ? "Candidate in a report, NOT verified (may not be a PPA rate): NPR " + fmt(cand.npr_per_kwh, 2) + " (page " + cand.source.page + "). Confirm, then add it with import-csv --kind facts."
+           : "Not found in any downloaded report. Add a verified value with import-csv --kind facts.");
+  row(t, "Tax status", m.tax.label + (m.tax.effective_rate_pct !== null ? " (effective rate " + fmt(m.tax.effective_rate_pct, 1) + "%)" : ""), m.tax.basis);
+  (m.tax.report_mentions || []).forEach(x => row(t, "Report wording", x));
+  row(t, "Current loans", "NPR " + npr(m.loans_npr), m.financials_period ? "Loans & long-term liabilities, " + m.financials_period : "No financials loaded");
+  row(t, "Finance cost", "NPR " + npr(m.finance_cost_npr), m.finance_cost_period);
+  row(t, "Debt / equity", dash(m.debt_to_equity, v => fmt(v, 2)), "loans / (paid-up capital + reserves)");
+  row(t, "Finance cost / sales", dash(m.finance_cost_pct_of_sales, v => fmt(v, 1) + "%"));
+  row(t, "Electricity sales", "NPR " + npr(m.electricity_sales_npr));
+  row(t, "Net profit", "NPR " + npr(m.net_profit_npr));
+  row(t, "EPS / net worth per share", dash(m.eps, v => fmt(v, 2)) + " / " + dash(m.networth_per_share, v => fmt(v, 2)));
+  row(t, "ROE / ROA", dash(m.roe_pct, v => fmt(v, 1) + "%") + " / " + dash(m.roa_pct, v => fmt(v, 1) + "%"));
+
+  const fd = document.getElementById("future");
+  row(fd, "Operational today", fmt(fu.operational_mw, 1) + " MW");
+  row(fd, "Pipeline (building + licensed)", fmt(fu.pipeline_mw, 1) + " MW");
+  row(fd, "Capacity if pipeline lands", fmt(fu.capacity_if_pipeline_lands_mw, 1) + " MW", fu.capacity_multiple ? fmt(fu.capacity_multiple, 2) + "x today" : "");
+  row(fd, "Extra revenue if built", "NPR " + npr(fu.potential_extra_revenue_npr) + " / yr", "at " + npr(fu.revenue_per_mw_npr) + " per MW-year; " + fu.revenue_per_mw_basis);
+  row(fd, "Capex needed (at cost/MW above)", fu.capex_to_fund_npr ? "NPR " + npr(fu.capex_to_fund_npr) : "–", fu.capex_to_fund_npr ? "" : "needs a cost-per-MW figure");
+  row(fd, "Further planned (survey stage)", fmt(fu.planned_mw, 1) + " MW");
+  document.getElementById("future-note").textContent = fu.note;
+
+  // ---- trend: latest analysis, quarter comparison, five-year table
+  const tr = p.trend;
+  const pctSpan = v => v === null || v === undefined ? "–" : el("span", { style: "color:" + (v >= 0 ? "#1a9e6b" : "#c2453d") }, (v >= 0 ? "+" : "") + fmt(v, 1) + "%");
+  if (!tr.available) {
+    ["latest-bullets", "qtable", "annual"].forEach(id => document.getElementById(id).append(el("div", { class: "empty" }, tr.note)));
+  } else {
+    const L = tr.latest, lm = L.metrics || {};
+    document.getElementById("latest-period").textContent = L.period + (L.has_full_report ? "" : " (profit headline only)");
+    const saChange = (L.standalone_npr !== null && L.same_quarter_last_year_standalone_npr > 0)
+      ? (L.standalone_npr - L.same_quarter_last_year_standalone_npr) / L.same_quarter_last_year_standalone_npr * 100 : null;
+    const rowsL = [
+      ["Net profit, year to date", npr(L.net_profit_ytd_npr), npr(L.same_period_last_year_npr), pctSpan(L.yoy_pct)],
+      ["Standalone quarter profit", npr(L.standalone_npr), npr(L.same_quarter_last_year_standalone_npr), pctSpan(saChange)],
+      ["Previous quarter (standalone)", npr(L.previous_quarter_standalone_npr), "", ""],
+      ["Electricity sales", npr(lm.electricity_sales_npr), "n/a", ""], ["Finance cost", npr(lm.finance_cost_npr), "n/a", ""],
+      ["Loans and long-term liabilities", npr(lm.loans_npr), "n/a", ""],
+      ["Debt / equity", dash(lm.debt_to_equity, v => fmt(v, 2)), "n/a", ""], ["Net margin", dash(lm.net_margin_pct, v => fmt(v, 1) + "%"), "n/a", ""],
+      ["Finance cost / sales", dash(lm.finance_cost_pct_of_sales, v => fmt(v, 1) + "%"), "n/a", ""], ["Effective tax rate", dash(lm.effective_tax_rate_pct, v => fmt(v, 1) + "%"), "n/a", ""],
+      ["ROE / ROA", dash(lm.roe_pct, v => fmt(v, 1) + "%") + " / " + dash(lm.roa_pct, v => fmt(v, 1) + "%"), "n/a", ""],
+      ["EPS / net worth per share", dash(lm.eps, v => fmt(v, 2)) + " / " + dash(lm.networth_per_share, v => fmt(v, 2)), "n/a", ""],
+    ];
+    renderTable(document.getElementById("latest-table"), [
+      { label: "Item", render: r => r[0] }, { label: L.period, num: true, render: r => r[1] },
+      { label: "Same period last year", num: true, render: r => r[2] }, { label: "Change", num: true, render: r => r[3] },
+    ], rowsL);
+    L.bullets.forEach(b => document.getElementById("latest-bullets").append(el("li", {}, b)));
+    document.getElementById("latest-note").textContent = L.comparison_note || "";
+
+    const years = tr.years, cur = tr.current_fiscal_year;
+    const palette = ["#0b6e8a", "#8fb9c8", "#b9c6cf", "#d5dde3", "#e6ebef"];
+    let qchart;
+    function drawQuarters() {
+      const mode = document.getElementById("qmode").value;
+      if (qchart) qchart.destroy();
+      qchart = new Chart("c-quarters", { type: "bar", data: { labels: ["Q1", "Q2", "Q3", "Q4"],
+        datasets: years.map((fy, i) => ({ label: "FY " + fy + (fy === cur ? " (current)" : ""), backgroundColor: palette[i] || "#e6ebef",
+          data: [1, 2, 3, 4].map(q => { const v = tr.quarters[fy][q][mode]; return v === null ? null : v / 1e6; }) })) },
+        options: baseChartOptions({ plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ": NPR " + fmt(c.parsed.y, 1) + " m" } } },
+          scales: { y: { title: { display: true, text: "NPR million" } } } }) });
+      const yoyKey = mode === "ytd_npr" ? "ytd_yoy_pct" : "standalone_yoy_pct";
+      renderTable(document.getElementById("qtable"), [{ label: "Quarter", render: r => "Q" + r }].concat(years.map(fy => ({
+        label: "FY " + fy + (fy === cur ? " (current)" : ""), num: true,
+        render: q => { const c = tr.quarters[fy][q]; return el("span", {}, npr(c[mode]), " ", c[yoyKey] === null ? "" : el("small", {}, pctSpan(c[yoyKey]))); } }))), [1, 2, 3, 4]);
+    }
+    document.getElementById("qmode").addEventListener("change", drawQuarters);
+    drawQuarters();
+    document.getElementById("trend-note").textContent = tr.note + " Percentages compare with the same quarter of the previous fiscal year and are blank when that base is zero, negative or missing.";
+
+    renderTable(document.getElementById("annual"), [
+      { label: "Fiscal year", render: a => a.fiscal_year + (a.complete ? "" : " (Q" + a.quarters_reported + " so far)") },
+      { label: "Net profit", num: true, render: a => npr(a.net_profit_npr) }, { label: "YoY", num: true, render: a => pctSpan(a.yoy_pct) },
+      { label: "% of today's paid-up capital", num: true, render: a => dash(a.profit_pct_of_current_capital, v => fmt(v, 1) + "%") },
+      { label: "Sales", num: true, render: a => npr(a.full_report.electricity_sales_npr) }, { label: "Finance cost", num: true, render: a => npr(a.full_report.finance_cost_npr) },
+      { label: "Loans", num: true, render: a => npr(a.full_report.loans_npr) }, { label: "Debt / equity", num: true, render: a => dash(a.full_report.debt_to_equity, v => fmt(v, 2)) },
+      { label: "ROE", num: true, render: a => dash(a.full_report.roe_pct, v => fmt(v, 1) + "%") }, { label: "EPS", num: true, render: a => dash(a.full_report.eps, v => fmt(v, 2)) },
+      { label: "Net worth / share", num: true, render: a => dash(a.full_report.networth_per_share, v => fmt(v, 2)) },
+    ], tr.annual);
+  }
+
+  // ---- map and geographic zones
+  const geo = p.geo, allProjects = [];
+  ["Operational", "Under Construction", "Licensed", "Planned"].forEach(st => p.portfolio.stages[st].forEach(r => allProjects.push(Object.assign({ stage: st }, r))));
+  const zoneCols = [{ label: "Zone", key: "zone" }, { label: "Projects", num: true, key: "projects" },
+    { label: "Op. MW", num: true, render: z => fmt(z["Operational"], 1) }, { label: "Build MW", num: true, render: z => fmt(z["Under Construction"], 1) },
+    { label: "Lic. MW", num: true, render: z => fmt(z["Licensed"], 1) }, { label: "Plan MW", num: true, render: z => fmt(z["Planned"], 1) }];
+  renderTable(document.getElementById("geo-belt"), zoneCols, geo.by_belt, { empty: "No projects." });
+  renderTable(document.getElementById("geo-province"), zoneCols, geo.by_province, { empty: "No projects." });
+  document.getElementById("geo-note").textContent = geo.note + (geo.unmapped ? " " + geo.unmapped + " project(s) have no coordinates, so they appear in the tables but not on the map." : "");
+  document.getElementById("map-hint").textContent = geo.mapped + " on map" + (geo.by_belt.length ? " · " + geo.by_belt.filter(z => z.zone !== "Unknown").map(z => z.zone).join(" / ") : "");
+  const pts = allProjects.filter(r => r.latitude !== null && r.longitude !== null);
+  const mapBox = document.getElementById("cmap");
+  if (!pts.length) {
+    mapBox.replaceWith(el("div", { class: "empty" }, "No project coordinates on record for this company."));
+  } else {
+    const cmap = L.map("cmap");
+    const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(cmap);
+    let tileErrors = 0;
+    tiles.on("tileerror", () => { if (++tileErrors === 3) document.getElementById("geo-note").append(" Base-map tiles could not be loaded (openstreetmap.org unreachable?); project markers are still shown."); });
+    const group = L.featureGroup();
+    pts.forEach(r => {
+      const m = L.circleMarker([r.latitude, r.longitude], { radius: Math.max(6, Math.min(20, 4 + Math.sqrt(r.capacity_mw || 0))), color: "#fff", weight: 1.5,
+        fillColor: STATUS_COLORS[r.stage], fillOpacity: 0.85 });
+      m.bindPopup(el("div", {}, el("strong", {}, r.name), el("br"), fmt(r.capacity_mw, 1) + " MW · " + r.stage, el("br"),
+        [r.district, r.belt, r.province].filter(Boolean).join(" · "), el("br"), el("a", { href: "/projects/" + encodeURIComponent(r.project_id) }, "Project details")));
+      m.bindTooltip(r.name, { direction: "top" });
+      group.addLayer(m);
+    });
+    group.addTo(cmap);
+    if (pts.length === 1) cmap.setView([pts[0].latitude, pts[0].longitude], 9); else cmap.fitBounds(group.getBounds(), { padding: [30, 30], maxZoom: 10 });
+    const legend = document.getElementById("cmap-legend");
+    ["Operational", "Under Construction", "Licensed", "Planned"].filter(st => pts.some(r => r.stage === st)).forEach(st =>
+      legend.append(el("span", {}, el("span", { class: "dot", style: "background:" + STATUS_COLORS[st] }), st + " (" + pts.filter(r => r.stage === st).length + ")")));
+    legend.append(el("span", { class: "sub", style: "font-size:12px" }, "circle size = capacity"));
+    document.getElementById("map-fold").addEventListener("toggle", () => setTimeout(() => cmap.invalidateSize(), 50));  // a map inside a closed fold has no size
+  }
+
+  const stagesBox = document.getElementById("stages");
+  ["Operational", "Under Construction", "Licensed", "Planned"].forEach(stage => {
+    const list = p.portfolio.stages[stage];
+    const holder = el("div");
+    stagesBox.append(el("details", { class: "card fold", style: "margin-top:16px" },
+      el("summary", {}, el("h2", {}, el("span", { class: "dot", style: "background:" + STATUS_COLORS[stage] }), stage),
+         el("span", { class: "hint" }, list.length + (list.length === 1 ? " project" : " projects") + " · " + fmt(p.portfolio.mw[stage], 1) + " MW")),
+      el("div", { class: "fold-body" }, holder)));
+    renderTable(holder, [
+      { label: "Project", render: r => projectLink(r.project_id, r.name) }, { label: "MW", num: true, render: r => fmt(r.capacity_mw, 2) },
+      { label: "District", key: "district" },
+      { label: stage === "Operational" ? "Since" : "Expected", num: true, render: r => r.commissioning_year || r.expected_completion_year || "–" },
+      { label: "Licence expires", render: r => r.license_expiry || "–" },
+      { label: "Cost (NPR)", num: true, render: r => el("span", { title: r.cost_basis || "" }, npr(r.cost_npr)) },
+      { label: "Cost / MW", num: true, render: r => npr(r.cost_per_mw_npr) },
+    ], list, { empty: "None on record." });
+  });
+
+  const hist = p.history.filter(h => h.net_profit_npr !== null);
+  if (hist.length) {
+    const ordered = [...hist].reverse();
+    new Chart("c-hist", { type: "bar", data: { labels: ordered.map(h => h.fiscal_year + " Q" + h.quarter),
+      datasets: [{ label: "Net profit, year to date (NPR m)", data: ordered.map(h => h.net_profit_npr / 1e6), backgroundColor: "#0b6e8a" }] },
+      options: baseChartOptions({ plugins: { legend: { display: false } } }) });
+  } else document.getElementById("c-hist").parentElement.replaceWith(el("div", { class: "empty" }, "No quarterly results loaded."));
+  renderTable(document.getElementById("hist"), [
+    { label: "Period", render: r => r.fiscal_year + " Q" + r.quarter }, { label: "Net profit", num: true, render: r => npr(r.net_profit_npr) },
+    { label: "Finance cost", num: true, render: r => npr(r.finance_cost_npr) }, { label: "Loans", num: true, render: r => npr(r.loans_npr) },
+  ], p.history.slice(0, 12), { empty: "" });
+
+  const rep = document.getElementById("reports");
+  if (!p.reports.length) rep.append(el("div", { class: "empty" }, "No report files found on the company's website" + (c.website ? "" : " (no website on record)") + ". Structured quarterly figures come from ShareSansar."));
+  else renderTable(rep, [
+    { label: "Kind", key: "kind" }, { label: "FY", render: r => (r.fiscal_year || "?") + (r.quarter ? " Q" + r.quarter : "") },
+    { label: "File", render: r => r.local_path ? el("a", { href: "/reports/" + r.report_id + "/file", target: "_blank" }, "open PDF")
+                                                 : el("a", { href: r.url, target: "_blank", rel: "noopener noreferrer" }, "source link") },
+    { label: "Status", key: "status" },
+  ], p.reports);
+  const facts = document.getElementById("facts");
+  if (!p.facts.length) facts.append(el("div", { class: "empty" }, "None extracted yet (needs downloaded annual reports)."));
+  p.facts.forEach(x => facts.append(el("div", { style: "margin-bottom:10px" },
+    el("strong", {}, x.fact_type.replace(/_/g, " ")), ": ", x.value_num !== null ? fmt(x.value_num, 2) + " " + (x.unit || "") : (x.value_text || ""),
+    el("small", { class: "warn" }, x.verified ? " verified" : " unverified"),
+    el("div", { class: "sub", style: "font-size:12px;margin:0" }, "FY " + (x.fiscal_year || "?") + ", page " + (x.page || "?") + ": “" + (x.snippet || "") + "”"))));
+  // ---- fold summaries and controls
+  const setHint = (id, text) => { const n = document.getElementById(id); if (n) n.textContent = text; };
+  if (tr.available) {
+    const L2 = tr.latest;
+    setHint("latest-period", L2.period + (L2.has_full_report ? "" : " (profit headline only)"));
+    setHint("quarters-hint", tr.years.length + " fiscal years, FY " + tr.current_fiscal_year + " is current");
+    setHint("annual-hint", tr.annual.length + " years · latest profit " + npr(tr.annual[0].net_profit_npr));
+  }
+  setHint("hist-hint", p.history.filter(h => h.net_profit_npr !== null).length + " quarters on record");
+  const done = p.reports.filter(r => r.local_path).length;
+  setHint("reports-hint", p.reports.length ? p.reports.length + " listed · " + done + " downloaded" : "none found");
+  setHint("facts-hint", p.facts.length ? p.facts.length + " candidates" : "none");
+  const folds = () => document.querySelectorAll("details.fold");
+  document.getElementById("expand-all").addEventListener("click", () => folds().forEach(d => { d.open = true; }));
+  document.getElementById("collapse-all").addEventListener("click", () => folds().forEach(d => { d.open = false; }));
+  folds().forEach(d => d.addEventListener("toggle", () => window.dispatchEvent(new Event("resize"))));  // charts inside a closed fold have no size yet
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+SQLAlchemy>=2.0
+pandas>=2.0
+openpyxl>=3.1
+click>=8.1
+rich>=13.0
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+Flask>=3.0
+pytest>=8.0
+html5lib>=1.1
+nepali-datetime>=1.0
+pypdf>=4.0

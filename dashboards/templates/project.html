@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ project_id }} · Nepal Hydropower{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">{% endblock %}
+{% block content %}
+<p class="sub"><a href="/projects">&larr; All projects</a></p>
+<h1 id="title">{{ project_id }}</h1>
+<p class="sub" id="subtitle"></p>
+<div class="grid two">
+  <div class="card"><h2>Specifications</h2><dl class="props" id="props"></dl></div>
+  <div class="grid">
+    <div class="card"><h2>Location</h2><div id="mini" style="height:260px;border-radius:8px"></div></div>
+    <div class="card"><h2>Reported financials</h2><div id="fin"></div></div>
+    <div class="card"><h2>Shareholders</h2><div id="holders"></div></div>
+    <div class="card"><h2>News</h2><ul class="news" id="news"></ul></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+<script>
+const LABELS = {
+  capacity_mw: "Capacity (MW)", project_type: "Type", turbine_type: "Turbine", turbine_count: "Turbines", design_head_m: "Design head (m)",
+  design_discharge_m3s: "Design discharge (m³/s)", tunnel_length_m: "Tunnel (m)", annual_energy_generation_gwh: "Annual energy (GWh)",
+  province: "Province", district: "District", river_name_raw: "River (as reported)", location_raw: "Location (as reported)",
+  developer: "Developer / promoter", owner: "Owner", developer_symbol: "NEPSE symbol", status: "Stage",
+  commissioning_date: "Commissioned", commissioning_year: "Commissioning year", expected_completion_year: "Expected completion",
+  license_type: "Licence type", license_number: "Licence no.", license_issue_date: "Licence issued", license_expiry_date: "Licence expires",
+  transmission_voltage_kv: "Transmission (kV)", estimated_project_cost_usd: "Est. cost (USD)", estimated_project_cost_npr: "Est. cost (NPR)",
+  ppa_rate_npr_per_kwh: "PPA rate (NPR/kWh)", data_source: "Source", data_reliability: "Data reliability", inference_note: "Inferred values (not source-reported)", notes: "Notes",
+};
+(async () => {
+  let p;
+  try { p = await api("/api/projects/" + encodeURIComponent({{ project_id|tojson }})); }
+  catch (e) { showError(document.getElementById("props"), e); return; }
+  document.getElementById("title").textContent = p.project_name_en;
+  document.getElementById("subtitle").append(statusPill(p.status), ` ${fmt(p.capacity_mw, 2)} MW · ${p.district || "district unknown"}`);
+  const dl = document.getElementById("props");
+  Object.entries(LABELS).forEach(([k, label]) => {
+    const v = p[k]; if (v === null || v === undefined || v === "") return;
+    const text = typeof v !== "number" ? v : k.includes("year") ? String(v) : fmt(v, Number.isInteger(v) ? 0 : 2);  // 2021 not "2,021.00"
+    dl.append(el("dt", {}, label), el("dd", {}, text));
+  });
+  if (p.data_reliability === "seed-unverified" || p.data_reliability === "wikipedia")
+    document.getElementById("subtitle").append(el("div", { class: "warn" },
+      p.data_reliability === "wikipedia" ? "From Wikipedia only (no DoED match): lower confidence." : "Hand-entered seed row, not confirmed by a scrape."));
+
+  if (p.latitude && p.longitude) {
+    const m = L.map("mini").setView([p.latitude, p.longitude], 10);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap contributors" }).addTo(m);
+    L.circleMarker([p.latitude, p.longitude], { radius: 9, fillColor: STATUS_COLORS[p.status], color: "#fff", fillOpacity: .9 }).addTo(m);
+  } else document.getElementById("mini").replaceWith(el("div", { class: "empty" }, "No coordinates on record."));
+
+  const finBox = document.getElementById("fin");
+  renderTable(finBox, [
+    { label: "FY", key: "fiscal_year" }, { label: "GWh", num: true, render: r => fmt(r.energy_gwh, 1) },
+    { label: "Revenue (NPR)", num: true, render: r => fmt(r.revenue_npr) }, { label: "CF %", num: true, render: r => fmt(r.capacity_factor_pct, 1) },
+  ], p.financials, { empty: "No reported financials loaded (add via import-csv --kind financials)." });
+  renderTable(document.getElementById("holders"), [
+    { label: "Shareholder", key: "shareholder" }, { label: "Type", key: "type" }, { label: "Stake %", num: true, render: r => fmt(r.stake_pct, 2) },
+  ], p.shareholders, { empty: "No shareholder data loaded (add via import-csv --kind shareholders)." });
+  const news = document.getElementById("news");
+  if (!p.updates.length) news.append(el("li", { class: "empty" }, "No news matched."));
+  p.updates.forEach(u => news.append(el("li", {}, el("a", { href: u.url, target: "_blank", rel: "noopener noreferrer" }, u.title), " ", el("small", {}, `${u.source} · ${u.date}`))));
+})();
+</script>
+{% endblock %}

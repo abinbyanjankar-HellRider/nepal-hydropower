@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Analytics · Nepal Hydropower{% endblock %}
+{% block content %}
+<h1>Analytics</h1>
+<p class="sub">Slice capacity by any dimension, and watch licences that have lapsed on projects that have not been commissioned.</p>
+<form class="filters" id="controls">
+  <label>Group by<select name="by">
+    {% for v in ['province','district','river','developer','type','size','status'] %}<option>{{ v }}</option>{% endfor %}</select></label>
+  <label>Stage<select name="status"><option value="">All</option>{% for s in statuses %}<option>{{ s }}</option>{% endfor %}</select></label>
+  <label>Top<input name="top" type="number" value="15" min="3" max="50" style="width:80px"></label>
+  <button type="submit">Update</button>
+</form>
+<div class="grid two">
+  <div class="card"><h2 id="cap-title">Capacity</h2><div class="chart-box"><canvas id="c-cap"></canvas></div></div>
+  <div class="card"><h2>Construction pipeline by expected year</h2><div class="chart-box"><canvas id="c-pipe"></canvas></div></div>
+</div>
+<div class="card" style="margin-top:16px"><h2>What is "Unknown"?</h2>
+  <p class="sub" style="font-size:13px">Some projects lack a location, river, developer or type in every source, so the charts above group them as "Unknown". This shows how much that is, why, and lists the projects behind it. Values that were inferred (from coordinates, a same-named DoED project, or words in the project name) are marked on each project page; anything that could not be traced is left Unknown.</p>
+  <div id="unk-summary"></div>
+  <div class="filters" style="margin-top:14px"><label>List projects with unknown<select id="unk-by"><option value="province">province</option><option value="district">district</option><option value="river">river</option><option value="developer">developer</option><option value="type">project type</option></select></label></div>
+  <div id="unk-detail" class="sub" style="font-size:13px;margin-bottom:8px"></div><div id="unk-list"></div></div>
+<div class="card" style="margin-top:16px"><h2>Licence watch: expired or expiring within a year (not yet operational)</h2><div id="lic"></div></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+let capChart;
+const form = document.getElementById("controls");
+async function capacity() {
+  const p = {}; new FormData(form).forEach((v, k) => { if (v) p[k] = v; });
+  const rows = await api("/api/analytics/capacity", p);
+  document.getElementById("cap-title").textContent = `Capacity (MW) by ${p.by}` + (p.status ? `, ${p.status}` : "");
+  if (capChart) capChart.destroy();
+  capChart = new Chart("c-cap", { type: "bar", data: { labels: rows.map(r => r.group),
+      datasets: [{ data: rows.map(r => r.total_mw), backgroundColor: p.status ? STATUS_COLORS[p.status] : "#0b6e8a" }] },
+    options: baseChartOptions({ indexAxis: "y", plugins: { legend: { display: false }, tooltip: { callbacks: {
+      afterLabel: ctx => `${rows[ctx.dataIndex].projects} projects · ${rows[ctx.dataIndex].share_pct}%` } } } }) });
+}
+form.addEventListener("submit", e => { e.preventDefault(); capacity().catch(err => alert(err.message)); });
+capacity().catch(e => showError(document.getElementById("cap-title").parentElement, e));
+
+api("/api/projects/statistics").then(s => new Chart("c-pipe", { type: "bar",
+  data: { labels: s.pipeline.map(r => r.expected_year), datasets: [{ data: s.pipeline.map(r => r.total_mw), backgroundColor: STATUS_COLORS["Under Construction"] }] },
+  options: baseChartOptions({ plugins: { legend: { display: false } } }) })).catch(() => {});
+
+api("/api/analytics/licences", { days: 365 }).then(rows => renderTable(document.getElementById("lic"), [
+  { label: "Project", render: r => projectLink(r.project_id, r.name) }, { label: "MW", num: true, render: r => fmt(r.capacity_mw, 1) },
+  { label: "Stage", render: r => statusPill(r.status) }, { label: "Licence", key: "license_type" },
+  { label: "Expires", key: "license_expiry_date" }, { label: "Days left", num: true, render: r => fmt(r.days_left) },
+  { label: "Developer", key: "developer" },
+], rows, { empty: "No expired licences." })).catch(e => showError(document.getElementById("lic"), e));
+
+async function unknowns() {
+  const by = document.getElementById("unk-by").value;
+  const r = await api("/api/analytics/unknowns", { by });
+  renderTable(document.getElementById("unk-summary"), [
+    { label: "Attribute", key: "label" }, { label: "Unknown projects", num: true, render: x => fmt(x.projects) },
+    { label: "% of projects", num: true, render: x => fmt(x.share_of_projects_pct, 1) + "%" }, { label: "Unknown MW", num: true, render: x => fmt(x.mw) },
+    { label: "% of MW", num: true, render: x => fmt(x.share_of_mw_pct, 1) + "%" }, { label: "Why", key: "why" },
+  ], r.summary);
+  const d = r.detail.find(x => x.dimension === by);
+  document.getElementById("unk-detail").textContent = "By source: " + d.by_source.map(s => s.source + " — " + s.projects + " projects, " + fmt(s.mw) + " MW").join("; ") +
+    ".  By stage: " + d.by_stage.map(s => s.stage + " " + s.projects + " (" + fmt(s.mw) + " MW)").join(", ") + ".";
+  renderTable(document.getElementById("unk-list"), [
+    { label: "Project", render: x => projectLink(x.project_id, x.name) }, { label: "MW", num: true, render: x => fmt(x.capacity_mw, 1) },
+    { label: "Stage", render: x => statusPill(x.status) }, { label: "Province", key: "province" }, { label: "District", key: "district" },
+    { label: "River", key: "river" }, { label: "Developer", key: "developer" },
+  ], r.projects, { empty: "Nothing unknown here." });
+}
+document.getElementById("unk-by").addEventListener("change", () => unknowns().catch(e => showError(document.getElementById("unk-list"), e)));
+unknowns().catch(e => showError(document.getElementById("unk-list"), e));
+</script>
+{% endblock %}

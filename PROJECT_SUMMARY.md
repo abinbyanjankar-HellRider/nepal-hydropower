@@ -177,3 +177,55 @@ The design and phase breakdown remain in `hydropower_project_plan.md`.
   Skipped: Butwal Power (its ICRA report mixes a 6-13 flat tariff with 4.8 / 8.4 for another plant), Chilime (no rating report found;
   the ICRA link returned 404), and the search summaries for Singati, Green Ventures and Ridi (only ranges). The Mandu capacity
   conflict is now explained: DoED's 32 MW is the licensed capacity including a 10 MW unit under construction (22 MW operating).
+- Seventh batch (2026-09-27): 11 more at the standard 4.80 / 8.40, each read from the PDF itself (Super Madi, Swet Ganga,
+  Vision Lumbini, Himalayan Power Partner, Snow Rivers, Daram Khola, Sayapatri, Mount Everest Power, Suryakunda, River Falls,
+  Three Star; Three Star's dry peak-hour tariff is 8.5-9.4, stored as a note). Verified PPA total is now **55 of 111**.
+  Skipped: Sikles (two PPAs, 4 / 7 on 9.968 MW and 4.80 / 8.40 on 3.032 MW) and Sanjen (the only copy found was a dead link;
+  a search summary claims 4.80 / 8.40 but that is not primary). ICRA's site returns HTTP 406 to bare curl; send browser
+  Accept / Accept-Language / Referer headers.
+- Eighth batch (2026-09-27): 10 more at 4.80 / 8.40 (Universal Power, United Idi Mardi, Samling, Sanvi, Asian Hydropower,
+  Mandakini, Yambaling, Bhujung, Bindhyabasini, Shikhar Power). Verified PPA total is now **65 of 111**. Skipped: National
+  Hydro Power (Indrawati III: flat 4.83 on 5 MW plus seasonal rates on 2.5 MW), Ru Ru Jalbidhyut (PPA base 4 / 7 but paid a
+  temporary promotional 4.80 / 8.40 for seven years), Khani Khola (the reports that downloaded give no figures).
+- Ninth batch (2026-09-27): 8 more. Union Hydropower, Rapti Hydro, Ghalemdi, Upper Syange and Upper Lohore at 4.80 / 8.40;
+  Radhi, Ru Ru and Ankhu Khola at their PPA base tariff of 4 / 7 (the reports say a government promotional 4.80 / 8.40 was paid
+  for seven years and then the PPA rate applies; Radhi's ended April 2021). This reverses the eighth-batch skip of Ru Ru: the PPA
+  rate itself is unambiguous, the promotion is not part of the PPA. Verified PPA total is now **73 of 111**. Skipped for mixed
+  tariffs: Ngadi Group (3.90-7.00 range), Eastern Hydropower (4/7 on 2.475 MW, 4.8/8.4 on 2.525 MW), Barun (3.90/5.52 and
+  4.80/8.40), Himal Dolakha (three tiers). Molun: no rating report found.
+- Tenth batch (2026-09-27): 14 more. At 4.80 / 8.40: Appolo, Bhugol, Bikash, Buddha Bhumi, Mabilung, Super Mai, Peoples Power,
+  Mai Khola, Super Khudi, Mathillo Mailun. At 4 / 7: Barahi (no promotion mentioned) and Nepal Hydro Developer (promotional
+  4.80 / 8.40 up to the 6th year after COD). Bhagawati at 5.08 / 8.89, which CARE gives as the present rate including
+  escalations (like Sanima Mai). Shuvam Power (SPL, owner of Baneshwor's 0.99 MW Lower Piluwa) at an older 3.90 / 5.52.
+  Verified PPA total is now **87 of 111**. Skipped: Green Life (4 / 7 on 25 MW, 4.80 / 8.40 on 15 MW) and Kalika Power (report
+  gives no figures). Note: MMKJL's linked DoED projects are Middle Mailung and Upper Mailung B, while its rating report covers the
+  14.3 MW Mathillo Mailung plant; worth checking the project links.
+
+## Listed names and small fixes (2026-09-27)
+- New `companies.listed_name` column holds the NEPSE listing name, set on every `sync --source nepse` (cleared on delisting).
+  `company_name` stays the DoED promoter name, because aliases and DoED merges match on it; renaming a company would make the
+  next DoED sync recreate the promoter and steal its projects. Profiles, the companies table and `/api/companies/<id>` now show
+  `listed_name` first, plus `doed_name`. Fixes SMHL showing as "Himal Hydro" (now "Super Madi Hydropower Limited"), and similar
+  cases such as SPL (DoED "Baneshwor Hydropower", listed as Shuvam Power). Synced twice: 111 matched, 0 created. Regression test added (89 pass).
+- NHDL had no website on record; set to https://charnawatihydro.com (the site names Nepal Hydro Developer Limited and its
+  3.52 MW Charnawati plant). 106 of 111 now have a website; still none for MKHC, MEHL, RAWA, TPC, TPKHL.
+- Not changed, needs confirmation: MMKJL's DoED links are Middle Mailung (13 MW) and Upper Mailung B (17 MW), both under
+  construction, while its rating report covers the operating 14.3 MW Mathillo ("Upper") Mailung plant. DoED registers the
+  14.3 MW "Upper Mailun Khola" (HP_084, licence 79, Rasuwa) to "Upper Mailung Khola Hydropower Limited." and Wikipedia
+  adds a duplicate (HP_765) under "Sanima Hydropower". Same plant is likely, but no primary source ties the DoED promoter to
+  MMKJL yet. If confirmed, add `Upper Mailung Khola Hydropower Limited.,Mathillo Mailung Khola Jalbidhyut Ltd` to
+  data/company_name_variants.csv and re-sync.
+- Locations: 2 of the last 6 unlocated projects filled via data/location_overrides.csv. Phalaku Khila 5 MW -> Rasuwa / Bagmati
+  (Samyak Engineering project page: 5 MW Phalakhu Khola, Rasuwa, under construction). Chisang Khola-A 1.8 MW -> Koshi only
+  (ERC list confirms the licence; Chisang Khola is in Morang per NRB; district not stated, left blank). Still unlocated: Nyam Nyam
+  (6 MW; a PPA news item exists but the page would not load), Jhyaku Khola (5.24 MW), Istul Khola (1.51 MW), Tawa Khola HEP
+  (9.96 MW; DoED's four other Tawa Khola projects are all in Taplejung, but a match is not proven). None has a DoED licence row.
+
+## Dashboard redesign (2026-09-27, ui-ux-pro-max skill)
+- Swiss-minimal, data-dense style with a water-teal palette; light and dark themes (follows the OS, toggle in the sidebar,
+  choice saved in localStorage). All colours are tokens in dashboards/static/style.css; charts and map markers read them.
+- Sidebar navigation with Lucide icons (local sprite dashboards/static/vendor/icons.svg) and aria-current; collapses to a
+  menu button under 1024 px. Skip link, visible focus rings, reduced-motion support.
+- Status badges are tinted with a dot and text (no white-on-colour); sortable table headers are keyboard buttons with aria-sort;
+  profit changes carry a +/- sign as well as green/red. Every text pair checked at >= 4.5:1 in both themes.
+- Fonts: Fira Sans / Fira Code from Google Fonts (falls back to system fonts offline). Page scripts and element IDs unchanged.

@@ -1,8 +1,15 @@
 // Shared helpers. All data comes from scraped sources, so DOM is built with textContent only.
-const STATUS_COLORS = {
-  "Operational": "#1a9e6b", "Under Construction": "#e08a1e", "Licensed": "#5b6bd6",
-  "Planned": "#8a94a6", "Suspended": "#c2453d", "Decommissioned": "#5a5f6a",
+const ICONS = "/static/vendor/icons.svg";
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// Status colours live in style.css (--st-*) so light and dark themes stay in one place; read them live.
+const STATUS_VARS = {
+  "Operational": "--st-operational", "Under Construction": "--st-construction", "Licensed": "--st-licensed",
+  "Planned": "--st-planned", "Suspended": "--st-suspended", "Decommissioned": "--st-decommissioned",
 };
+const STATUS_COLORS = {};
+Object.entries(STATUS_VARS).forEach(([k, v]) => Object.defineProperty(STATUS_COLORS, k, { get: () => cssVar(v), enumerable: true }));
+const CHART_SERIES = () => ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"].map(cssVar);
 
 async function api(path, params) {
   const url = new URL(path, window.location.origin);
@@ -25,8 +32,26 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+// Decorative icon from the local Lucide sprite (hidden from screen readers; pair it with visible text).
+function icon(name, cls) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "icon" + (cls ? " " + cls : ""));
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(ns, "use");
+  use.setAttribute("href", ICONS + "#i-" + name);
+  svg.append(use);
+  return svg;
+}
+
 const fmt = (n, d = 0) => (n === null || n === undefined) ? "–" :
   Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+
+// +12.3% / -4.0% with a sign, so the meaning never depends on the green/red colour alone.
+function signedPct(v, title) {
+  if (v === null || v === undefined) return "–";
+  return el("span", { class: v >= 0 ? "pos" : "neg", title: title || null }, (v >= 0 ? "+" : "") + fmt(v, 1) + "%");
+}
 
 function statusPill(status) {
   return el("span", { class: "pill " + status.replace(/ /g, "-") }, status);
@@ -36,13 +61,20 @@ function projectLink(id, name) { return el("a", { href: "/projects/" + encodeURI
 function companyLink(id, name) { return el("a", { href: "/companies/" + encodeURIComponent(id) }, name); }
 
 // columns: [{key, label, num?, render?(row) -> Node|string, sort?}]
+// Sortable headers are real buttons (keyboard reachable) and expose the current order through aria-sort.
 function renderTable(container, columns, rows, opts = {}) {
   container.replaceChildren();
   if (!rows.length) { container.append(el("div", { class: "empty" }, opts.empty || "No rows.")); return; }
   const head = el("tr", {}, columns.map(c => {
-    const th = el("th", { class: (c.num ? "num " : "") + (c.sort ? "sortable" : "") }, c.label);
-    if (c.sort && opts.onSort) th.addEventListener("click", () => opts.onSort(c.sort));
-    if (c.sort && opts.sortKey === c.sort) th.append(opts.sortDir === "asc" ? " ▲" : " ▼");
+    const active = c.sort && opts.sortKey === c.sort;
+    const th = el("th", { class: c.num ? "num" : "", scope: "col",
+                          "aria-sort": active ? (opts.sortDir === "asc" ? "ascending" : "descending") : null });
+    if (c.sort && opts.onSort) {
+      const btn = el("button", { type: "button", class: "sort-btn", title: "Sort by " + c.label }, c.label,
+                     icon(active ? (opts.sortDir === "asc" ? "arrow-up" : "arrow-down") : "arrow-up-down"));
+      btn.addEventListener("click", () => opts.onSort(c.sort));
+      th.append(btn);
+    } else th.append(c.label);
     return th;
   }));
   const body = rows.map(r => el("tr", {}, columns.map(c =>
@@ -50,10 +82,28 @@ function renderTable(container, columns, rows, opts = {}) {
   container.append(el("div", { class: "table-wrap" }, el("table", { class: "data" }, el("thead", {}, head), el("tbody", {}, body))));
 }
 
-const chartFont = getComputedStyle(document.body).color;
+// Chart.js styling from the theme tokens: subtle grid, muted ticks, legible tooltips, no entrance animation
+// when the user asks for reduced motion.
+function applyChartTheme() {
+  if (!window.Chart) return;
+  const d = Chart.defaults;
+  d.font.family = cssVar("--font-sans").replace(/"/g, "") || "system-ui";
+  d.font.size = 12;
+  d.color = cssVar("--muted");
+  d.borderColor = cssVar("--grid");
+  d.plugins.tooltip.backgroundColor = cssVar("--text");
+  d.plugins.tooltip.titleColor = cssVar("--surface");
+  d.plugins.tooltip.bodyColor = cssVar("--surface");
+  d.plugins.tooltip.padding = 10;
+  d.plugins.tooltip.cornerRadius = 6;
+  d.plugins.legend.labels.usePointStyle = true;
+  d.plugins.legend.labels.boxWidth = 8;
+  d.elements.bar.borderRadius = 3;
+  d.elements.arc.borderColor = cssVar("--surface");
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) d.animation = false;
+}
 function baseChartOptions(extra) {
-  if (window.Chart) { Chart.defaults.color = getComputedStyle(document.body).getPropertyValue("--muted").trim() || "#667085";
-                      Chart.defaults.borderColor = getComputedStyle(document.body).getPropertyValue("--line").trim() || "#e3e7ee"; }
+  applyChartTheme();
   return Object.assign({ responsive: true, maintainAspectRatio: false }, extra || {});
 }
 
@@ -69,3 +119,54 @@ function npr(v) {
 function showError(container, err) {
   container.replaceChildren(el("div", { class: "empty" }, "Could not load data: " + err.message));
 }
+
+// ---------- theme toggle ----------
+// Charts keep the colours they were drawn with, so on a switch every token value used by a chart
+// is swapped for its counterpart in the new theme and the charts are redrawn in place.
+const THEME_TOKENS = [...Object.values(STATUS_VARS), "--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--accent", "--accent-strong"];
+function isDark() { return getComputedStyle(document.documentElement).colorScheme === "dark"; }
+function setTheme(theme) {
+  const before = Object.fromEntries(THEME_TOKENS.map(t => [t, cssVar(t)]));
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("theme", theme); } catch (e) { /* storage blocked: theme lasts for this page only */ }
+  const swap = new Map(THEME_TOKENS.map(t => [before[t].toLowerCase(), cssVar(t)]));
+  const remap = v => typeof v === "string" && swap.has(v.toLowerCase()) ? swap.get(v.toLowerCase()) : v;
+  if (window.Chart) {
+    applyChartTheme();
+    Object.values(Chart.instances).forEach(ch => {
+      ch.data.datasets.forEach(ds => ["backgroundColor", "borderColor"].forEach(k => {
+        if (Array.isArray(ds[k])) ds[k] = ds[k].map(remap); else ds[k] = remap(ds[k]);
+      }));
+      ch.update("none");
+    });
+  }
+  updateThemeButton();
+}
+function updateThemeButton() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  const dark = isDark();
+  btn.querySelector(".theme-label").textContent = dark ? "Dark theme" : "Light theme";
+  btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+}
+
+// ---------- mobile menu ----------
+document.addEventListener("DOMContentLoaded", () => {
+  updateThemeButton();
+  document.getElementById("theme-toggle")?.addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", updateThemeButton);
+
+  const sidebar = document.getElementById("sidebar"), menuBtn = document.getElementById("menu-btn");
+  if (!sidebar || !menuBtn) return;
+  const setOpen = open => {
+    sidebar.classList.toggle("open", open);
+    menuBtn.setAttribute("aria-expanded", String(open));
+    menuBtn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    menuBtn.querySelector("use").setAttribute("href", ICONS + (open ? "#i-x" : "#i-menu"));
+  };
+  menuBtn.addEventListener("click", () => setOpen(!sidebar.classList.contains("open")));
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && sidebar.classList.contains("open")) { setOpen(false); menuBtn.focus(); }
+  });
+  document.addEventListener("click", e => { if (sidebar.classList.contains("open") && !sidebar.contains(e.target)) setOpen(false); });
+});

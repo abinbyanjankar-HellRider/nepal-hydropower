@@ -21,7 +21,7 @@ function taxCell(r) {
             t, r.effective_tax_rate_pct !== null ? el("small", { style: "color:var(--muted)" }, " " + fmt(r.effective_tax_rate_pct, 1) + "%") : null);
 }
 const cols = [
-  { label: "Symbol", sort: "symbol", render: r => r.symbol || "–" },
+  { label: "Symbol", sort: "symbol", render: r => r.symbol ? el("span", { class: "sym" }, r.symbol) : "–" },
   { label: "Company", sort: "name", render: r => el("a", { href: "/companies/" + r.company_id }, r.name) },
   { label: "Operating MW", num: true, sort: "operational_mw", render: r => fmt(r.operational_mw, 1) },
   { label: "Building MW", num: true, sort: "construction_mw", render: r => fmt(r.construction_mw, 1) },
@@ -34,7 +34,7 @@ const cols = [
   { label: "Finance cost (NPR)", num: true, sort: "finance_cost_npr", render: r => npr(r.finance_cost_npr) },
   { label: "Debt / equity", num: true, sort: "debt_to_equity", render: r => r.debt_to_equity === null ? "–" : fmt(r.debt_to_equity, 2) },
   { label: "Latest profit YoY", num: true, sort: "profit_yoy_pct", render: r => (r.profit_yoy_pct === null || r.profit_yoy_pct === undefined) ? "–" :
-      el("span", { title: "Year-to-date net profit, " + r.latest_period + ", vs the same period last year", style: "color:" + (r.profit_yoy_pct >= 0 ? "#1a9e6b" : "#c2453d") }, (r.profit_yoy_pct >= 0 ? "+" : "") + fmt(r.profit_yoy_pct, 1) + "%") },
+      signedPct(r.profit_yoy_pct, "Year-to-date net profit, " + r.latest_period + ", vs the same period last year") },
 ];
 function draw() {
   const q = f.q.value.trim().toLowerCase();

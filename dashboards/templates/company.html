@@ -23,7 +23,7 @@
 <details class="card fold" open style="margin-top:16px" id="map-fold">
   <summary><h2>Map: where the projects are</h2><span class="hint" id="map-hint"></span></summary>
   <div class="fold-body"><div class="grid two">
-    <div><div id="cmap" style="height:400px;border-radius:8px;background:#dfe6ec"></div><div class="legend" id="cmap-legend" style="margin-top:8px"></div></div>
+    <div><div id="cmap" style="height:400px;border-radius:var(--radius);background:var(--map-bg)"></div><div class="legend" id="cmap-legend" style="margin-top:8px"></div></div>
     <div><h3 style="margin:0 0 6px;font-size:14px">By ecological belt</h3><div id="geo-belt"></div>
       <h3 style="margin:14px 0 6px;font-size:14px">By province</h3><div id="geo-province"></div>
       <p class="sub" id="geo-note" style="font-size:12px;margin-top:10px"></p></div>
@@ -116,7 +116,7 @@ const dash = (v, f) => (v === null || v === undefined) ? "–" : f(v);
 
   // ---- trend: latest analysis, quarter comparison, five-year table
   const tr = p.trend;
-  const pctSpan = v => v === null || v === undefined ? "–" : el("span", { style: "color:" + (v >= 0 ? "#1a9e6b" : "#c2453d") }, (v >= 0 ? "+" : "") + fmt(v, 1) + "%");
+  const pctSpan = v => signedPct(v);
   if (!tr.available) {
     ["latest-bullets", "qtable", "annual"].forEach(id => document.getElementById(id).append(el("div", { class: "empty" }, tr.note)));
   } else {
@@ -143,13 +143,13 @@ const dash = (v, f) => (v === null || v === undefined) ? "–" : f(v);
     document.getElementById("latest-note").textContent = L.comparison_note || "";
 
     const years = tr.years, cur = tr.current_fiscal_year;
-    const palette = ["#0b6e8a", "#8fb9c8", "#b9c6cf", "#d5dde3", "#e6ebef"];
+    const palette = CHART_SERIES();
     let qchart;
     function drawQuarters() {
       const mode = document.getElementById("qmode").value;
       if (qchart) qchart.destroy();
       qchart = new Chart("c-quarters", { type: "bar", data: { labels: ["Q1", "Q2", "Q3", "Q4"],
-        datasets: years.map((fy, i) => ({ label: "FY " + fy + (fy === cur ? " (current)" : ""), backgroundColor: palette[i] || "#e6ebef",
+        datasets: years.map((fy, i) => ({ label: "FY " + fy + (fy === cur ? " (current)" : ""), backgroundColor: palette[i] || palette[palette.length - 1],
           data: [1, 2, 3, 4].map(q => { const v = tr.quarters[fy][q][mode]; return v === null ? null : v / 1e6; }) })) },
         options: baseChartOptions({ plugins: { tooltip: { callbacks: { label: c => c.dataset.label + ": NPR " + fmt(c.parsed.y, 1) + " m" } } },
           scales: { y: { title: { display: true, text: "NPR million" } } } }) });
@@ -232,7 +232,7 @@ const dash = (v, f) => (v === null || v === undefined) ? "–" : f(v);
   if (hist.length) {
     const ordered = [...hist].reverse();
     new Chart("c-hist", { type: "bar", data: { labels: ordered.map(h => h.fiscal_year + " Q" + h.quarter),
-      datasets: [{ label: "Net profit, year to date (NPR m)", data: ordered.map(h => h.net_profit_npr / 1e6), backgroundColor: "#0b6e8a" }] },
+      datasets: [{ label: "Net profit, year to date (NPR m)", data: ordered.map(h => h.net_profit_npr / 1e6), backgroundColor: cssVar("--chart-1") }] },
       options: baseChartOptions({ plugins: { legend: { display: false } } }) });
   } else document.getElementById("c-hist").parentElement.replaceWith(el("div", { class: "empty" }, "No quarterly results loaded."));
   renderTable(document.getElementById("hist"), [

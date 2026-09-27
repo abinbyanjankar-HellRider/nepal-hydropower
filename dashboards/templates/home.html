@@ -41,7 +41,7 @@
       options: baseChartOptions({ plugins: { legend: { display: false } } }) });
     new Chart("c-timeline", { data: { labels: s.timeline.map(r => r.year), datasets: [
         { type: "bar", label: "MW added", data: s.timeline.map(r => r.mw_added), backgroundColor: STATUS_COLORS["Operational"], yAxisID: "y" },
-        { type: "line", label: "Cumulative MW", data: s.timeline.map(r => r.cumulative_mw), borderColor: "#14507a", yAxisID: "y1", pointRadius: 0 }] },
+        { type: "line", label: "Cumulative MW", data: s.timeline.map(r => r.cumulative_mw), borderColor: cssVar("--accent-strong"), backgroundColor: cssVar("--accent-strong"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 }] },
       options: baseChartOptions({ scales: { y: { position: "left" }, y1: { position: "right", grid: { drawOnChartArea: false } } } }) });
     new Chart("c-top", { type: "bar",
       data: { labels: s.top_operational.map(r => r.name), datasets: [{ data: s.top_operational.map(r => r.capacity_mw), backgroundColor: STATUS_COLORS["Operational"] }] },

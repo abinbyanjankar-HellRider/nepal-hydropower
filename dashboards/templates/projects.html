@@ -14,7 +14,7 @@
   <label>Max MW<input name="capacity_max" type="number" step="any" style="width:90px"></label>
   <button type="submit">Apply</button>
   <button type="button" class="ghost" id="reset">Reset</button>
-  <a href="/api/export/excel?format=master" class="ghost" style="margin-left:auto">Download Excel</a>
+  <a href="/api/export/excel?format=master" class="ghost" style="margin-left:auto"><svg class="icon" aria-hidden="true"><use href="{{ url_for('static', filename='vendor/icons.svg') }}#i-download"/></svg>Download Excel</a>
 </form>
 <div class="card">
   <div id="count" class="sub" style="margin-bottom:8px"></div>
@@ -39,7 +39,7 @@ const columns = [
   { label: "MW", num: true, sort: "capacity_mw", render: r => fmt(r.capacity_mw, 2) },
   { label: "Stage", sort: "status", render: r => statusPill(r.status) },
   { label: "District", sort: "district", key: "district" },
-  { label: "Developer", sort: "developer", render: r => el("span", {}, r.developer || "–", r.symbol ? el("small", { class: "warn", style: "color:var(--accent)" }, " " + r.symbol) : null) },
+  { label: "Developer", sort: "developer", render: r => el("span", {}, r.developer || "–", r.symbol ? [" ", el("small", { class: "sym" }, r.symbol)] : null) },
   { label: "COD", num: true, sort: "commissioning_year", render: r => r.commissioning_year || r.expected_completion_year ? (r.commissioning_year || "exp. " + r.expected_completion_year) : "–" },
 ];
 async function load() {

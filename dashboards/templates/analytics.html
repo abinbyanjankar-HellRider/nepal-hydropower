@@ -32,11 +32,11 @@ async function capacity() {
   document.getElementById("cap-title").textContent = `Capacity (MW) by ${p.by}` + (p.status ? `, ${p.status}` : "");
   if (capChart) capChart.destroy();
   capChart = new Chart("c-cap", { type: "bar", data: { labels: rows.map(r => r.group),
-      datasets: [{ data: rows.map(r => r.total_mw), backgroundColor: p.status ? STATUS_COLORS[p.status] : "#0b6e8a" }] },
+      datasets: [{ data: rows.map(r => r.total_mw), backgroundColor: p.status ? STATUS_COLORS[p.status] : cssVar("--chart-1") }] },
     options: baseChartOptions({ indexAxis: "y", plugins: { legend: { display: false }, tooltip: { callbacks: {
       afterLabel: ctx => `${rows[ctx.dataIndex].projects} projects · ${rows[ctx.dataIndex].share_pct}%` } } } }) });
 }
-form.addEventListener("submit", e => { e.preventDefault(); capacity().catch(err => alert(err.message)); });
+form.addEventListener("submit", e => { e.preventDefault(); capacity().catch(err => showError(document.getElementById("cap-title").parentElement.querySelector(".chart-box"), err)); });
 capacity().catch(e => showError(document.getElementById("cap-title").parentElement, e));
 
 api("/api/projects/statistics").then(s => new Chart("c-pipe", { type: "bar",

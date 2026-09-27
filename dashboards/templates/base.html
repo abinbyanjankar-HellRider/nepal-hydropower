@@ -4,19 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Nepal Hydropower{% endblock %}</title>
+  <script>
+    // Apply a saved theme before first paint so the page never flashes the wrong colours.
+    try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600&family=Fira+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% block head %}{% endblock %}
 </head>
 <body>
-<header class="top"><div class="inner">
-  <a class="brand" href="/">Nepal Hydropower</a>
-  <nav>
-    {% for href, label in [('/', 'Overview'), ('/map', 'Map'), ('/projects', 'Projects'), ('/companies', 'Companies'), ('/news', 'News'), ('/analytics', 'Analytics')] %}
-    <a href="{{ href }}" class="{{ 'active' if request.path == href or (href != '/' and request.path.startswith(href)) else '' }}">{{ label }}</a>
-    {% endfor %}
-  </nav>
-</div></header>
-<main>{% block content %}{% endblock %}</main>
+{% set icons = url_for('static', filename='vendor/icons.svg') %}
+{% set nav = [('/', 'Overview', 'layout-dashboard'), ('/map', 'Map', 'map'), ('/projects', 'Projects', 'table-2'),
+              ('/companies', 'Companies', 'building-2'), ('/news', 'News', 'newspaper'), ('/analytics', 'Analytics', 'chart-column')] %}
+<a class="skip-link" href="#main">Skip to main content</a>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="{{ icons }}#i-droplets"/></svg></span>
+        <span class="brand-text">Nepal Hydropower<small>Project &amp; company database</small></span>
+      </a>
+      <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-controls="primary-nav" aria-expanded="false" aria-label="Open menu">
+        <svg class="icon" aria-hidden="true"><use href="{{ icons }}#i-menu"/></svg>
+      </button>
+    </div>
+    <nav id="primary-nav" class="nav" aria-label="Primary">
+      {% for href, label, icon in nav %}
+      {% set active = request.path == href or (href != '/' and request.path.startswith(href)) %}
+      <a href="{{ href }}" class="nav-link{{ ' active' if active }}"{{ ' aria-current="page"'|safe if active }}>
+        <svg class="icon" aria-hidden="true"><use href="{{ icons }}#i-{{ icon }}"/></svg><span>{{ label }}</span>
+      </a>
+      {% endfor %}
+      <div class="nav-foot">
+        <button type="button" class="nav-link theme-toggle" id="theme-toggle" aria-label="Switch colour theme">
+          <svg class="icon icon-sun" aria-hidden="true"><use href="{{ icons }}#i-sun"/></svg>
+          <svg class="icon icon-moon" aria-hidden="true"><use href="{{ icons }}#i-moon"/></svg>
+          <span class="theme-label">Theme</span>
+        </button>
+        <p class="nav-note">Sources: DoED, Wikipedia, NEPSE, ShareSansar, rating agencies.</p>
+      </div>
+    </nav>
+  </aside>
+  <main id="main" tabindex="-1">{% block content %}{% endblock %}</main>
+</div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>

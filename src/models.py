@@ -105,6 +105,7 @@ class Company(Base):
     total_capacity_developed_mw: Mapped[Optional[float]] = mapped_column(Float)
     listed_shares: Mapped[Optional[int]] = mapped_column(Integer)
     paidup_value: Mapped[Optional[float]] = mapped_column(Float)
+    listed_name: Mapped[Optional[str]] = mapped_column(String(200))  # NEPSE name; company_name stays DoED's promoter name
     sharesansar_id: Mapped[Optional[int]] = mapped_column(Integer)
     email: Mapped[Optional[str]] = mapped_column(String(200))
     address: Mapped[Optional[str]] = mapped_column(String(300))

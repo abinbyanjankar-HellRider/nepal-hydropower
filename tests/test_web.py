@@ -53,6 +53,37 @@ def test_api_rejects_bad_input_with_json_errors(client):
     assert r.status_code == 404 and r.get_json()["error"]
 
 
+def test_non_integer_query_params_are_400_not_500(client):
+    """Regression: top/days/limit were cast with a bare int(), so '?top=abc' crashed with a server error."""
+    for url in ("/api/analytics/capacity?by=province&top=abc", "/api/analytics/licences?days=soon",
+                "/api/analytics/unknowns?by=province&limit=x", "/api/news?limit=lots", "/api/projects?offset=1.5"):
+        r = client.get(url)
+        assert r.status_code == 400 and "must be an integer" in r.get_json()["error"], url
+    assert client.get("/api/news?limit=0").status_code == 200  # out-of-range values are clamped, not rejected
+    assert client.get("/api/analytics/capacity?by=province&top=").status_code == 200  # empty -> default
+
+
+def test_next_project_id_compares_numbers_not_text():
+    from src.dashboard import next_project_id
+    assert next_project_id(["HP_1", "HP_2", "HP_3"]) == "HP_004"
+    assert next_project_id(["HP_998", "HP_999", "HP_1000"]) == "HP_1001"  # text order would pick HP_999
+    assert next_project_id(["X_9", None]) == "HP_001"
+
+
+def test_news_shows_listed_company_name(db, client):
+    """Regression: news showed the DoED promoter name ('Himal Hydro') instead of the NEPSE listed name."""
+    from datetime import date
+    from src.models import Company, ProjectUpdate
+    with db.session_scope() as s:
+        c = Company(company_name="Himal Hydro", listed_name="Super Madi Hydropower Limited", nepse_listed=True, stock_symbol="SMHL")
+        s.add(c)
+        s.flush()
+        s.add(ProjectUpdate(company_id=c.company_id, update_date=date(2026, 9, 1), title="SMHL results",
+                            source_name="Test", source_url="https://example.org/a"))
+    item = client.get("/api/news?scope=companies").get_json()[0]
+    assert item["company"] == "Super Madi Hydropower Limited" and item["company_symbol"] == "SMHL"
+
+
 def test_json_has_no_nan(client):
     raw = client.get("/api/projects").get_data(as_text=True)
     assert "NaN" not in raw  # NaN is invalid JSON; missing values must be null

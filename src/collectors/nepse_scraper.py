@@ -80,7 +80,7 @@ def sync_listed_companies(session: Session, listed: list[dict], aliases: dict[st
     """
     companies = list(session.scalars(select(Company)))
     for c in companies:
-        c.nepse_listed, c.stock_symbol, c.listed_shares, c.paidup_value = False, None, None, None
+        c.nepse_listed, c.stock_symbol, c.listed_shares, c.paidup_value, c.listed_name = False, None, None, None, None
     by_key = {company_key(c.company_name): c for c in companies}
     by_squashed = {_squash(k): c for k, c in by_key.items()}
     aliases = load_aliases() if aliases is None else aliases
@@ -98,6 +98,7 @@ def sync_listed_companies(session: Session, listed: list[dict], aliases: dict[st
             result["matched"] += 1
         company.nepse_listed = True
         company.stock_symbol = row["symbol"]
+        company.listed_name = row["name"][:200]
         company.listed_shares = row["listed_shares"]
         company.paidup_value = row["paidup_value"]
     return result

@@ -199,7 +199,8 @@ def build_profile(session: Session, company_id: int) -> dict | None:
                 "finance_cost_npr": r.finance_cost_npr, "loans_npr": r.loans_npr, "electricity_sales_npr": r.electricity_sales_npr}
                for r in sorted(fin_rows, key=lambda r: (r.fiscal_year, r.quarter), reverse=True)]
     return {
-        "company": {"company_id": c.company_id, "name": c.company_name, "symbol": c.stock_symbol, "listed": c.nepse_listed,
+        "company": {"company_id": c.company_id, "name": c.listed_name or c.company_name, "doed_name": c.company_name,
+                    "symbol": c.stock_symbol, "listed": c.nepse_listed,
                     "website": c.website, "website_source": c.website_source, "email": c.email, "address": c.address,
                     "listed_shares": c.listed_shares},
         "geo": {"by_belt": _zone_table(stages, "belt", BELTS), "by_province": _zone_table(stages, "province"),
@@ -233,7 +234,8 @@ def list_profiles(session: Session, listed_only: bool = True) -> list[dict]:
             continue
         m, mw = p["metrics"], p["portfolio"]["mw"]
         rows.append({
-            "company_id": c.company_id, "name": c.company_name, "symbol": c.stock_symbol, "projects": p["portfolio"]["projects"],
+            "company_id": c.company_id, "name": c.listed_name or c.company_name, "doed_name": c.company_name,
+            "symbol": c.stock_symbol, "projects": p["portfolio"]["projects"],
             "operational_mw": mw["Operational"], "construction_mw": mw["Under Construction"], "licensed_mw": mw["Licensed"],
             "planned_mw": mw["Planned"], "cost_per_mw_npr": (m["cost_per_mw"] or {}).get("npr"),
             "cost_per_mw_basis": (m["cost_per_mw"] or {}).get("basis") or m["cost_per_mw_note"],

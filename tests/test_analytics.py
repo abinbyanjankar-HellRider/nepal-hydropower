@@ -138,5 +138,22 @@ def test_nepse_alias_links_a_confirmed_promoter_and_resync_resets_stale_flags(db
         sync_listed_companies(s, [row], aliases={"MMKJL": "Mathillo Mailung Khola Jalvidyut Ltd."})
         linked = s.scalars(select(Company).where(Company.stock_symbol == "MMKJL")).one()
         assert linked.company_name == "Mathillo Mailung Khola Jalvidyut Ltd."
+        assert linked.listed_name == "Mathillo Mailun Khola Jalvidhyut Limited"  # NEPSE name kept alongside DoED's
         sync_listed_companies(s, [], aliases={})  # company delisted: flags must be cleared
         assert s.scalars(select(Company).where(Company.nepse_listed.is_(True))).all() == []
+        assert linked.listed_name is None
+
+
+def test_profile_shows_listed_name_for_aliased_promoter(db):
+    """Regression: SMHL showed as 'Himal Hydro' (its DoED promoter name) instead of Super Madi Hydropower."""
+    from sqlalchemy import select
+    from src.models import Company
+    from src.analytics.company_profiles import build_profile
+    with db.session_scope() as s:
+        upsert_projects(s, [{"project_id": "HP_1", "project_name_en": "Super Madi", "developer": "Himal Hydro"}])
+        sync_listed_companies(s, [{"symbol": "SMHL", "name": "Super Madi Hydropower Limited", "listed_shares": 1,
+                                   "paidup_value": 100.0}], aliases={"SMHL": "Himal Hydro"})
+        c = s.scalars(select(Company).where(Company.stock_symbol == "SMHL")).one()
+        prof = build_profile(s, c.company_id)["company"]
+    assert prof["name"] == "Super Madi Hydropower Limited"
+    assert prof["doed_name"] == "Himal Hydro"

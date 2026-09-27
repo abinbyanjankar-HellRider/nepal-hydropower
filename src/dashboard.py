@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 import math
 import os
+import re
 from datetime import date, datetime
 
 import pandas as pd
@@ -56,6 +57,29 @@ def json_safe(obj):
 
 def records(df: pd.DataFrame) -> list[dict]:
     return [{k: _clean(v) for k, v in row.items()} for row in df.to_dict("records")]
+
+
+def int_arg(name: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+    """Integer query parameter clamped to [lo, hi]; a non-integer is a 400, not a server error."""
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            abort(400, f"{name} must be an integer")
+    if lo is not None:
+        value = max(value, lo)
+    if hi is not None:
+        value = min(value, hi)
+    return value
+
+
+def next_project_id(existing) -> str:
+    """HP_<n+1> from the highest numeric id. Comparing ids as text would rank 'HP_999' above 'HP_1000'."""
+    nums = [int(m.group(1)) for pid in existing if pid and (m := re.fullmatch(r"HP_(\d+)", pid))]
+    return f"HP_{max(nums, default=0) + 1:03d}"
 
 
 def create_app(db: DatabaseManager | None = None) -> Flask:
@@ -127,13 +151,9 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
         sort = a.get("sort", "capacity_mw")
         if sort not in SORTABLE:
             abort(400, f"sort must be one of {sorted(SORTABLE)}")
-        df = df.rename(columns={"name": "name"}).sort_values(
-            sort, ascending=a.get("order", "desc") == "asc", na_position="last")
-        try:
-            limit = min(int(a.get("limit", 100)), 1000)
-            offset = max(int(a.get("offset", 0)), 0)
-        except ValueError:
-            abort(400, "limit/offset must be integers")
+        df = df.sort_values(sort, ascending=a.get("order", "desc") == "asc", na_position="last")
+        limit = int_arg("limit", 100, lo=0, hi=1000)
+        offset = int_arg("offset", 0, lo=0)
         return jsonify({"total": len(df), "items": records(df.iloc[offset:offset + limit][LIST_COLUMNS])})
 
     @app.get("/api/projects/statistics")
@@ -176,7 +196,7 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
             abort(400, f"by must be one of {[*tech.GROUPINGS, 'size']}")
         if status and status not in STATUSES:
             abort(400, f"status must be one of {STATUSES}")
-        return jsonify(records(tech.capacity_by(frame(), by, status).head(int(request.args.get("top", 20)))))
+        return jsonify(records(tech.capacity_by(frame(), by, status).head(int_arg("top", 20, lo=1, hi=200))))
 
     @app.get("/api/analytics/unknowns")
     def api_unknowns():
@@ -185,11 +205,11 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
             abort(400, f"by must be one of {list(unk.DIMENSIONS)}")
         df = frame()
         return jsonify({"summary": records(pd.DataFrame(unk.summary(df))[["dimension", "label", "projects", "share_of_projects_pct", "mw", "share_of_mw_pct", "why"]]),
-                        "detail": json_safe(unk.summary(df)), "projects": records(unk.unknown_projects(df, by, int(request.args.get("limit", 30))))})
+                        "detail": json_safe(unk.summary(df)), "projects": records(unk.unknown_projects(df, by, int_arg("limit", 30, lo=1, hi=1000)))})
 
     @app.get("/api/analytics/licences")
     def api_licences():
-        return jsonify(records(tech.expiring_licences(frame(), int(request.args.get("days", 365))).head(50)))
+        return jsonify(records(tech.expiring_licences(frame(), int_arg("days", 365, lo=0, hi=36500)).head(50)))
 
     @app.get("/api/geojson")
     def api_geojson():
@@ -246,7 +266,8 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
                 abort(404, "unknown company")
             projects = [{"project_id": p.project_id, "name": p.project_name_en, "capacity_mw": p.capacity_mw,
                          "status": p.status.value} for p in c.developed_projects]
-            return jsonify({"company_id": c.company_id, "name": c.company_name, "nepse_listed": c.nepse_listed,
+            return jsonify({"company_id": c.company_id, "name": c.listed_name or c.company_name, "doed_name": c.company_name,
+                            "nepse_listed": c.nepse_listed,
                             "symbol": c.stock_symbol, "projects": projects})
 
     @app.get("/api/news")
@@ -255,7 +276,7 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
         scope = request.args.get("scope", "all")
         if scope not in ("all", "projects", "companies"):
             abort(400, "scope must be 'all', 'projects' or 'companies'")
-        limit = min(int(request.args.get("limit", 30)), 200)
+        limit = int_arg("limit", 30, lo=1, hi=200)
         with db.session_scope() as s:
             stmt = select(ProjectUpdate).order_by(ProjectUpdate.update_date.desc())
             if scope == "projects":
@@ -266,7 +287,8 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
             return jsonify([{"date": _clean(u.update_date), "title": u.title, "source": u.source_name,
                              "url": u.source_url, "project_id": u.project_id,
                              "project": u.project.project_name_en if u.project else None,
-                             "company_id": u.company_id, "company": u.company.company_name if u.company else None,
+                             "company_id": u.company_id,
+                             "company": (u.company.listed_name or u.company.company_name) if u.company else None,
                              "company_symbol": u.company.stock_symbol if u.company else (
                                  u.project.developer.stock_symbol if u.project and u.project.developer else None)}
                              for u in rows])
@@ -294,8 +316,7 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
             return jsonify({"errors": errors}), 400
         with db.session_scope() as s:
             if not data.get("project_id"):
-                count = s.scalar(select(Project.project_id).order_by(Project.project_id.desc()).limit(1)) or "HP_000"
-                data["project_id"] = f"HP_{int(count.split('_')[1]) + 1:03d}"
+                data["project_id"] = next_project_id(s.scalars(select(Project.project_id)))
             try:
                 project, created = upsert_project(s, data, default_reliability="api")
             except ValueError as exc:

@@ -253,3 +253,15 @@ for PostgreSQL, extend the scraper/CSV columns. Set `DATABASE_URL` for PostgreSQ
 - Three near-duplicate pairs remain flagged by `validate-data` for human judgement.
 - Browser rendering of the dashboard has been syntax-checked and its API exercised, but was not visually
   inspected in this environment.
+
+## Income and finance page
+
+`/income` shows, for every NEPSE-listed company with an operating plant: wet, dry and day-weighted average capacity
+usage; a four-quarter income forecast (production modelled from capacity and assumed seasonal capacity factors, priced
+at verified PPA rates, scaled to the last reported year of electricity sales); and a ranking by forecast annual income.
+A second panel shows each company's implied interest rate and finance-cost burden and what a lower rate would do to
+net profit, EPS and book value per share (defaults: -2 percentage points, 8% of the loan repaid per year, 70% of the
+extra profit retained, 5 years). Everything is an estimate; plants without a verified PPA rate use the assumed tariff
+and are flagged. API: `GET /api/income/forecast`, `GET /api/finance/impact`.
+Design and plan: `docs/superpowers/specs/2026-10-05-income-and-finance-cost-design.md` and
+`docs/superpowers/plans/2026-10-05-income-and-finance-cost.md`.

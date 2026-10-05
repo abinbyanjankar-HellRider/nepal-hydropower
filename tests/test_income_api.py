@@ -66,3 +66,11 @@ def test_income_page_renders_and_is_in_the_sidebar(client):
     r = client.get("/income")
     assert r.status_code == 200 and b"Income" in r.data
     assert b'href="/income"' in client.get("/").data
+
+
+def test_income_page_has_the_sections_and_controls(client):
+    html = client.get("/income").get_data(as_text=True)
+    for needle in ('id="kpis"', 'id="c-usage"', 'id="c-quarters"', 'id="rank"', 'id="fin-controls"',
+                   'name="rate_delta_pp"', 'name="repay_pct"', 'name="retention_pct"', 'name="years"',
+                   'id="fin"', 'id="plants"', "estimate"):
+        assert needle in html, needle

@@ -2,4 +2,140 @@
 {% block title %}Income &amp; finance · Nepal Hydropower{% endblock %}
 {% block content %}
 <h1>Income and finance cost</h1>
+<p class="sub">Every figure here is an estimate, not a reported result. Production is modelled from installed capacity and assumed seasonal capacity factors, priced at each plant's verified PPA rate (or an assumed tariff, flagged), then scaled once per company to its last reported year of electricity sales. Wet season is mid-April to mid-December, dry season mid-December to mid-April. Fiscal quarters start in Shrawan (mid-July).</p>
+
+<div class="grid kpis" id="kpis"></div>
+
+<div class="grid two">
+  <div class="card"><h2>Capacity usage by season (15 largest companies)</h2><div class="chart-box"><canvas id="c-usage"></canvas></div></div>
+  <div class="card"><h2 id="q-title">Forecast income by quarter (NPR)</h2><div class="chart-box"><canvas id="c-quarters"></canvas></div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>Companies ranked by forecast annual income</h2>
+  <p class="sub" id="rank-note" style="font-size:13px"></p>
+  <div id="rank"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>Finance cost and the effect of lower interest rates</h2>
+  <p class="sub" style="font-size:13px">Implied rate = finance cost ÷ year-end loans (an approximation: the average balance is not reported). The loan is assumed to be repaid by a fixed share of the current balance each year. A lower rate raises profit after the company's own effective tax rate; EPS uses paid-up capital ÷ 100 shares; book value per share grows by the retained part of the extra profit.</p>
+  <form class="filters" id="fin-controls">
+    <label>Rate change (percentage points)<input name="rate_delta_pp" type="number" step="0.25" min="-10" max="10" value="-2" style="width:110px"></label>
+    <label>Loan repaid per year (%)<input name="repay_pct" type="number" step="1" min="0" max="50" value="8" style="width:110px"></label>
+    <label>Extra profit retained (%)<input name="retention_pct" type="number" step="5" min="0" max="100" value="70" style="width:110px"></label>
+    <label>Horizon (years)<input name="years" type="number" step="1" min="1" max="10" value="5" style="width:90px"></label>
+    <button type="submit">Update</button>
+  </form>
+  <p class="sub" id="fin-note" style="font-size:13px"></p>
+  <div id="fin"></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2 id="plant-title">Plant allocation</h2>
+  <p class="sub" style="font-size:13px">Loans and finance cost are reported per company. They are spread across operating plants by MW share, so these plant figures are allocated, not reported. Pick a company in the table above.</p>
+  <div id="plants"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script>
+const FLAG_TEXT = {
+  assumed_rate: "assumed tariff", partial_year: "plant started in the reported year", no_reported_sales: "no reported sales",
+  calibration_clipped: "calibration clipped", no_loans: "no loans", tiny_loans: "tiny loans",
+  zero_finance_cost: "no finance cost reported", rate_out_of_range: "rate outside 2-20%", loss_making: "loss-making",
+};
+const flagText = flags => flags && flags.length ? flags.map(f => FLAG_TEXT[f] || f).join(", ") : "–";
+const pct = (v, d = 1) => (v === null || v === undefined) ? "–" : fmt(v, d) + "%";
+let financeRows = [];
+
+function kpi(label, value, note) {
+  return el("div", { class: "card kpi" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value), el("div", { class: "note" }, note || ""));
+}
+
+async function loadForecast() {
+  const data = await api("/api/income/forecast");
+  const a = data.assumptions, t = data.totals;
+  document.getElementById("kpis").replaceChildren(
+    kpi("Companies with an operating plant", fmt(t.companies), "NEPSE-listed"),
+    kpi("Operating capacity", fmt(t.capacity_mw, 0) + " MW", "owned or developed by those companies"),
+    kpi("Forecast income, " + (a.forecast_fiscal_year || "next year"), npr(t.annual_income_npr), "NPR, estimated"),
+    kpi("Average capacity usage", pct(t.avg_usage_pct), "wet " + pct(t.wet_usage_pct) + " · dry " + pct(t.dry_usage_pct) + ", day-weighted"));
+  document.getElementById("q-title").textContent = "Forecast income by quarter, FY " + (a.forecast_fiscal_year || "") + " (NPR)";
+  document.getElementById("rank-note").textContent =
+    `Model: annual capacity factor ${fmt(a.capacity_factor * 100, 0)}%, ${fmt(a.dry_energy_share * 100, 0)}% of energy in the dry season. ` +
+    `Fallback tariff ${a.fallback_wet_tariff} / ${a.fallback_dry_tariff} NPR/kWh where no verified PPA rate exists. ` +
+    `"Calibration" is reported FY ${a.reported_fiscal_year || "–"} sales ÷ modelled income, limited to ${a.calibration_range[0]}–${a.calibration_range[1]}.`;
+
+  const top = [...data.companies].sort((x, y) => y.capacity_mw - x.capacity_mw).slice(0, 15);
+  const series = CHART_SERIES();
+  new Chart("c-usage", { type: "bar",
+    data: { labels: top.map(c => c.symbol), datasets: [
+      { label: "Wet season", data: top.map(c => c.wet_usage_pct), backgroundColor: series[0] },
+      { label: "Dry season", data: top.map(c => c.dry_usage_pct), backgroundColor: series[1] },
+      { label: "Average", data: top.map(c => c.avg_usage_pct), backgroundColor: series[2] }] },
+    options: baseChartOptions({ scales: { y: { title: { display: true, text: "% of installed capacity" }, beginAtZero: true } } }) });
+
+  const perQuarter = data.quarters.map((_, i) => data.companies.reduce((sum, c) => sum + c.quarters[i].income_npr, 0));
+  new Chart("c-quarters", { type: "bar",
+    data: { labels: data.quarters, datasets: [{ data: perQuarter, backgroundColor: series[0] }] },
+    options: baseChartOptions({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => npr(ctx.parsed.y) + " NPR" } } },
+                                scales: { y: { ticks: { callback: v => npr(v) } } } }) });
+
+  const qCols = data.quarters.map((label, i) => ({ label: label.split(" ").pop(), num: true, render: r => npr(r.quarters[i].income_npr) }));
+  renderTable(document.getElementById("rank"), [
+    { label: "#", num: true, key: "rank" },
+    { label: "Company", render: r => companyLink(r.company_id, r.symbol + " · " + r.name) },
+    { label: "MW", num: true, render: r => fmt(r.capacity_mw, 1) },
+    { label: "Wet usage", num: true, render: r => pct(r.wet_usage_pct) },
+    { label: "Dry usage", num: true, render: r => pct(r.dry_usage_pct) },
+    { label: "Average usage", num: true, render: r => pct(r.avg_usage_pct) },
+    ...qCols,
+    { label: "Annual income", num: true, render: r => npr(r.annual_income_npr) },
+    { label: "Calibration", num: true, render: r => r.calibration.basis === "reported_sales" ? "×" + fmt(r.calibration.factor, 2) : "none" },
+    { label: "Notes", render: r => flagText(r.flags) },
+  ], data.companies, { empty: "No listed company has an operating plant with capacity." });
+}
+
+async function loadFinance() {
+  const form = document.getElementById("fin-controls");
+  const params = Object.fromEntries(new FormData(form).entries());
+  const data = await api("/api/finance/impact", params);
+  financeRows = data.companies;
+  const a = data.assumptions;
+  document.getElementById("fin-note").textContent =
+    `Scenario: rate ${a.rate_delta_pp > 0 ? "+" : ""}${a.rate_delta_pp} points, ${a.repay_pct}% of the loan repaid each year, ${a.retention_pct}% of extra profit retained, ${a.years}-year horizon. ` +
+    `Companies are ordered by finance cost as a share of forecast income (heaviest first).`;
+  renderTable(document.getElementById("fin"), [
+    { label: "Company", render: r => el("button", { type: "button", class: "sort-btn", title: "Show plant allocation", onclick: () => showPlants(r) }, r.symbol + " · " + r.name) },
+    { label: "Loans", num: true, render: r => npr(r.loans) },
+    { label: "Implied rate", num: true, render: r => pct(r.implied_rate_pct) },
+    { label: "Finance cost", num: true, render: r => npr(r.finance_cost) },
+    { label: "% of income", num: true, render: r => pct(r.burden_pct) },
+    { label: "Interest cover", num: true, render: r => r.interest_cover === null ? "–" : fmt(r.interest_cover, 1) + "×" },
+    { label: "Year-1 saving", num: true, render: r => r.scenario ? npr(r.scenario.years[0].saving) : "–" },
+    { label: "EPS now → year 1", num: true, render: r => r.scenario && r.scenario.eps_after_year1 !== null ? `${fmt(r.scenario.eps_baseline, 2)} → ${fmt(r.scenario.eps_after_year1, 2)}` : "–" },
+    { label: "Book value/share now → end", num: true, render: r => r.scenario && r.scenario.bvps_after_horizon !== null ? `${fmt(r.scenario.bvps_baseline, 1)} → ${fmt(r.scenario.bvps_after_horizon, 1)}` : "–" },
+    { label: "Notes", render: r => flagText(r.flags) },
+  ], financeRows, { empty: "No company has reported loans." });
+}
+
+function showPlants(row) {
+  document.getElementById("plant-title").textContent = "Plant allocation: " + row.symbol + " (FY " + row.fiscal_year + ")";
+  renderTable(document.getElementById("plants"), [
+    { label: "Plant", render: p => projectLink(p.project_id, p.plant) },
+    { label: "MW", num: true, render: p => fmt(p.mw, 1) },
+    { label: "Share", num: true, render: p => pct(p.share_pct) },
+    { label: "Allocated loans", num: true, render: p => npr(p.loans) },
+    { label: "Allocated finance cost", num: true, render: p => npr(p.finance_cost) },
+  ], row.plants, { empty: "This company has no operating plant with capacity, so nothing to allocate to." });
+}
+
+document.getElementById("fin-controls").addEventListener("submit", e => {
+  e.preventDefault();
+  loadFinance().catch(err => showError(document.getElementById("fin"), err));
+});
+loadForecast().catch(err => showError(document.getElementById("rank"), err));
+loadFinance().catch(err => showError(document.getElementById("fin"), err));
+</script>
 {% endblock %}

@@ -77,3 +77,63 @@ def test_loss_making_company_still_gains_from_a_rate_cut():
     p = fc.build_position(**{**POSITION, "net_profit": -80e6, "tax_provision": 10e6})
     s = fc.scenario(p, rate_delta_pp=-2, years=1)
     assert s["years"][0]["net_profit_change"] == pytest.approx(s["years"][0]["saving"])   # no tax charge
+
+
+from src.models import CompanyFinancial  # noqa: E402
+
+
+def test_allocate_to_plants_splits_by_mw_and_sums_back():
+    plants = [{"project_id": "A", "plant": "A", "mw": 10.0}, {"project_id": "B", "plant": "B", "mw": 30.0}]
+    out = fc.allocate_to_plants(100e6, 8e6, plants)
+    assert [round(p["share_pct"], 1) for p in out] == [25.0, 75.0]
+    assert sum(p["loans"] for p in out) == pytest.approx(100e6)
+    assert sum(p["finance_cost"] for p in out) == pytest.approx(8e6)
+    assert fc.allocate_to_plants(100e6, 8e6, []) == []
+
+
+def test_latest_positions_use_the_newest_full_year(db, income_world):
+    with db.session_scope() as s:
+        s.add(CompanyFinancial(company_id=income_world["alpha"], fiscal_year="2081/82", quarter=4, loans_npr=1.0,
+                               finance_cost_npr=1.0, paid_up_capital_npr=1.0))
+    with db.session_scope() as s:
+        positions = fc.latest_positions(s)
+    alpha = positions[income_world["alpha"]]
+    assert alpha["fiscal_year"] == "2082/83" and alpha["loans"] == pytest.approx(1_000e6)
+    assert income_world["unlisted"] not in positions
+
+
+def test_impact_ranks_by_burden_and_allocates_plants(db, income_world):
+    income = {income_world["alpha"]: 500e6, income_world["beta"]: 100e6}
+    with db.session_scope() as s:
+        out = fc.impact(s, income_by_company=income)
+    assert out["assumptions"] == {"rate_delta_pp": -2.0, "repay_pct": 8.0, "retention_pct": 70.0, "years": 5}
+    by = {c["symbol"]: c for c in out["companies"]}
+    assert by["ALPHA"]["burden_pct"] == pytest.approx(20.0) and by["BETA"]["burden_pct"] == pytest.approx(30.0)
+    assert [c["symbol"] for c in out["companies"]] == ["BETA", "ALPHA"]          # heaviest burden first
+    assert by["BETA"]["burden_rank"] == 1 and by["ALPHA"]["burden_rank"] == 2
+    alpha_plants = by["ALPHA"]["plants"]
+    assert {p["project_id"] for p in alpha_plants} == {"HP_1", "HP_2"}           # HP_5 is under construction
+    assert sum(p["loans"] for p in alpha_plants) == pytest.approx(1_000e6)
+    assert by["ALPHA"]["scenario"]["years"][0]["saving"] == pytest.approx(20e6)
+    assert len(by["ALPHA"]["scenario"]["years"]) == 5
+
+
+def test_impact_without_income_has_no_burden(db, income_world):
+    with db.session_scope() as s:
+        out = fc.impact(s, years=2)
+    assert all(c["burden_pct"] is None for c in out["companies"])
+    assert [c["symbol"] for c in out["companies"]] == ["ALPHA", "BETA"]           # symbol order when no burden
+    assert len(out["companies"][0]["scenario"]["years"]) == 2
+
+
+def test_impact_handles_zero_finance_cost_and_empty_database(db, income_world):
+    with db.session_scope() as s:
+        s.query(CompanyFinancial).filter_by(company_id=income_world["beta"], quarter=4).one().finance_cost_npr = 0.0
+    with db.session_scope() as s:
+        beta = next(c for c in fc.impact(s)["companies"] if c["symbol"] == "BETA")
+    assert beta["scenario"] is None and "zero_finance_cost" in beta["flags"] and beta["implied_rate_pct"] is None
+
+
+def test_impact_on_an_empty_database(db):
+    with db.session_scope() as s:
+        assert fc.impact(s)["companies"] == []

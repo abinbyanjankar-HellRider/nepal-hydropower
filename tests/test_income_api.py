@@ -74,3 +74,9 @@ def test_income_page_has_the_sections_and_controls(client):
                    'name="rate_delta_pp"', 'name="repay_pct"', 'name="retention_pct"', 'name="years"',
                    'id="fin"', 'id="plants"', "estimate"):
         assert needle in html, needle
+
+
+def test_income_page_shows_the_profit_shape_indicator(client):
+    """Spec section 1: the shape check is reported on the page, not only in the API."""
+    html = client.get("/income").get_data(as_text=True)
+    assert "Profit-shape gap" in html and "profit_shape_gap_pp" in html

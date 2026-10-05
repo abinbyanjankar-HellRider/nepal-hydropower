@@ -65,7 +65,8 @@ async function loadForecast() {
   document.getElementById("rank-note").textContent =
     `Model: annual capacity factor ${fmt(a.capacity_factor * 100, 0)}%, ${fmt(a.dry_energy_share * 100, 0)}% of energy in the dry season. ` +
     `Fallback tariff ${a.fallback_wet_tariff} / ${a.fallback_dry_tariff} NPR/kWh where no verified PPA rate exists. ` +
-    `"Calibration" is reported FY ${a.reported_fiscal_year || "–"} sales ÷ modelled income, limited to ${a.calibration_range[0]}–${a.calibration_range[1]}.`;
+    `"Calibration" is reported FY ${a.reported_fiscal_year || "–"} sales ÷ modelled income, limited to ${a.calibration_range[0]}–${a.calibration_range[1]}. ` +
+    `"Profit-shape gap" compares each quarter's share of reported FY ${a.reported_fiscal_year || "–"} profit with its share of modelled income, in percentage points: only a rough hint, because profit is more seasonal than income when costs are fixed.`;
 
   const top = [...data.companies].sort((x, y) => y.capacity_mw - x.capacity_mw).slice(0, 15);
   const series = CHART_SERIES();
@@ -93,6 +94,7 @@ async function loadForecast() {
     ...qCols,
     { label: "Annual income", num: true, render: r => npr(r.annual_income_npr) },
     { label: "Calibration", num: true, render: r => r.calibration.basis === "reported_sales" ? "×" + fmt(r.calibration.factor, 2) : "none" },
+    { label: "Profit-shape gap (pp)", num: true, render: r => r.profit_shape_gap_pp === null || r.profit_shape_gap_pp === undefined ? "–" : fmt(r.profit_shape_gap_pp, 1) },
     { label: "Notes", render: r => flagText(r.flags) },
   ], data.companies, { empty: "No listed company has an operating plant with capacity." });
 }

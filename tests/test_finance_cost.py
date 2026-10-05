@@ -35,6 +35,20 @@ def test_loss_making_company_has_zero_tax_rate():
     assert p["tax_rate"] == 0.0 and "loss_making" in p["flags"]
 
 
+def test_deferred_tax_credit_is_not_loss_making():
+    """Regression (final review): a profitable company with a negative tax provision was labelled loss-making."""
+    p = fc.build_position(**{**POSITION, "net_profit": 79.7e6, "tax_provision": -9.1e6})
+    assert "loss_making" not in p["flags"] and p["tax_rate"] == 0.0
+
+
+def test_net_loss_with_a_positive_tax_charge_is_loss_making_with_no_tax_on_extra_profit():
+    """Regression (final review): net loss plus a positive provision left a tax rate near 100%, wiping out the gain."""
+    p = fc.build_position(**{**POSITION, "net_profit": -20e6, "tax_provision": 50e6})
+    assert "loss_making" in p["flags"] and p["tax_rate"] == 0.0
+    s = fc.scenario(p, rate_delta_pp=-2, years=1)
+    assert s["years"][0]["net_profit_change"] == pytest.approx(s["years"][0]["saving"])
+
+
 def test_scenario_year_by_year_numbers():
     p = fc.build_position(**POSITION)
     s = fc.scenario(p, rate_delta_pp=-2, repay_pct=8, retention_pct=70, years=3)

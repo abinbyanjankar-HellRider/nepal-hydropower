@@ -35,11 +35,13 @@ def build_position(loans, finance_cost, net_profit, tax_provision, paid_up, eps,
         if not RATE_RANGE_PCT[0] <= rate <= RATE_RANGE_PCT[1]:
             flags.append("rate_out_of_range")
     pretax = (net_profit or 0.0) + tax
-    if pretax > 0 and tax >= 0:
-        tax_rate = min(tax / pretax, 1.0)
-    else:
-        tax_rate = 0.0
+    if (net_profit or 0.0) <= 0 or pretax <= 0:
+        tax_rate = 0.0          # a loss after tax: extra profit is not taxed until break-even
         flags.append("loss_making")
+    elif tax < 0:
+        tax_rate = 0.0          # profitable with a deferred-tax credit: no tax on extra profit, not a loss
+    else:
+        tax_rate = min(tax / pretax, 1.0)
     cover = (pretax + finance_cost) / finance_cost if finance_cost > 0 else None
     return {"loans": loans, "finance_cost": finance_cost, "implied_rate_pct": rate, "tax_rate": tax_rate,
             "shares": shares, "eps": eps, "bvps": bvps, "interest_cover": cover, "flags": flags}

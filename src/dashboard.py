@@ -13,7 +13,9 @@ from sqlalchemy import select
 
 from . import config
 from .analytics import company_profiles as profiles
+from .analytics import finance_cost
 from .analytics import financials as fin
+from .analytics import income
 from .analytics import load_projects_df
 from .analytics import ownership as own
 from .analytics import technical as tech
@@ -76,6 +78,22 @@ def int_arg(name: str, default: int, lo: int | None = None, hi: int | None = Non
     return value
 
 
+def float_arg(name: str, default: float, lo: float, hi: float, integer: bool = False) -> float:
+    """Numeric query parameter that must lie inside [lo, hi]; anything else (including nan/inf) is a 400."""
+    raw = request.args.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        abort(400, f"{name} must be a number")
+    if not math.isfinite(value) or not lo <= value <= hi:
+        abort(400, f"{name} must be between {lo:g} and {hi:g}")
+    if integer and value != int(value):
+        abort(400, f"{name} must be a whole number")
+    return int(value) if integer else value
+
+
 def next_project_id(existing) -> str:
     """HP_<n+1> from the highest numeric id. Comparing ids as text would rank 'HP_999' above 'HP_1000'."""
     nums = [int(m.group(1)) for pid in existing if pid and (m := re.fullmatch(r"HP_(\d+)", pid))]
@@ -120,6 +138,10 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
     @app.get("/analytics")
     def analytics_page():
         return render_template("analytics.html", statuses=STATUSES)
+
+    @app.get("/income")
+    def income_page():
+        return render_template("income.html")
 
     @app.get("/news")
     def news_page():
@@ -197,6 +219,23 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
         if status and status not in STATUSES:
             abort(400, f"status must be one of {STATUSES}")
         return jsonify(records(tech.capacity_by(frame(), by, status).head(int_arg("top", 20, lo=1, hi=200))))
+
+    @app.get("/api/income/forecast")
+    def api_income_forecast():
+        with db.session_scope() as s:
+            return jsonify(json_safe(income.forecast(s)))
+
+    @app.get("/api/finance/impact")
+    def api_finance_impact():
+        delta = float_arg("rate_delta_pp", finance_cost.DEFAULT_RATE_DELTA_PP, -10, 10)
+        repay = float_arg("repay_pct", finance_cost.DEFAULT_REPAY_PCT, 0, 50)
+        retention = float_arg("retention_pct", finance_cost.DEFAULT_RETENTION_PCT, 0, 100)
+        years = float_arg("years", finance_cost.DEFAULT_YEARS, 1, 10, integer=True)
+        with db.session_scope() as s:
+            forecast = income.forecast(s)
+            income_by_company = {c["company_id"]: c["annual_income_npr"] for c in forecast["companies"]}
+            return jsonify(json_safe(finance_cost.impact(
+                s, delta, repay, retention, years, income_by_company=income_by_company)))
 
     @app.get("/api/analytics/unknowns")
     def api_unknowns():

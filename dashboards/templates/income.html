@@ -2,7 +2,7 @@
 {% block title %}Income &amp; finance · Nepal Hydropower{% endblock %}
 {% block content %}
 <h1>Income and finance cost</h1>
-<p class="sub">Every figure here is an estimate, not a reported result. Production is modelled from installed capacity and assumed seasonal capacity factors, priced at each plant's verified PPA rate (or an assumed tariff, flagged), then scaled once per company to its last reported year of electricity sales. Wet season is mid-April to mid-December, dry season mid-December to mid-April. Fiscal quarters start in Shrawan (mid-July).</p>
+<p class="sub">Every figure here is an estimate, not a reported result. Production is modelled from installed capacity and assumed seasonal capacity factors, priced at each plant's verified PPA rate (or an assumed tariff, flagged), then scaled once per company to its last reported year of electricity sales. <strong>For a company scaled this way the forecast annual income equals last year's reported sales</strong>: the model re-spreads it across the four quarters and adds no growth and no new plants. Wet season is mid-April to mid-December, dry season mid-December to mid-April. Fiscal quarters start in Shrawan (mid-July).</p>
 
 <div class="grid kpis" id="kpis"></div>
 
@@ -12,14 +12,15 @@
 </div>
 
 <div class="card" style="margin-top:16px">
-  <h2>Companies ranked by forecast annual income</h2>
+  <h2>All NEPSE-listed hydropower companies: forecast income, EPS and book value</h2>
   <p class="sub" id="rank-note" style="font-size:13px"></p>
+  <p class="sub" id="tax-tally" style="font-size:13px"></p>
   <div id="rank"></div>
 </div>
 
 <div class="card" style="margin-top:16px">
   <h2>Finance cost and the effect of lower interest rates</h2>
-  <p class="sub" style="font-size:13px">Implied rate = finance cost ÷ year-end loans (an approximation: the average balance is not reported). The loan is assumed to be repaid by a fixed share of the current balance each year. A lower rate raises profit after the company's own effective tax rate; EPS uses paid-up capital ÷ 100 shares; book value per share grows by the retained part of the extra profit.</p>
+  <p class="sub" style="font-size:13px">Implied rate = finance cost ÷ year-end loans (an approximation: the average balance is not reported). The loan is assumed to be repaid by a fixed share of the current balance each year. A lower rate raises profit after the company's own effective tax rate, so a company on a tax holiday keeps all of it and a taxed company keeps about three quarters. EPS uses paid-up capital ÷ 100 shares; book value per share grows by the retained part of the extra profit. The repayment and retention controls also drive the forecast EPS and book value in the table above.</p>
   <form class="filters" id="fin-controls">
     <label>Rate change (percentage points)<input name="rate_delta_pp" type="number" step="0.25" min="-10" max="10" value="-2" style="width:110px"></label>
     <label>Loan repaid per year (%)<input name="repay_pct" type="number" step="1" min="0" max="50" value="8" style="width:110px"></label>
@@ -44,20 +45,37 @@ const FLAG_TEXT = {
   assumed_rate: "assumed tariff", partial_year: "plant started in the reported year", no_reported_sales: "no reported sales",
   calibration_clipped: "calibration clipped", no_loans: "no loans", tiny_loans: "tiny loans",
   zero_finance_cost: "no finance cost reported", rate_out_of_range: "rate outside 2-20%", loss_making: "loss-making",
+  no_operating_plant: "no operating plant", no_financials: "no full-year figures", no_shares: "no share count",
+  flat_income: "forecast held at last year's sales (calibration clipped)",
+  income_not_anchored: "forecast income is pure model (plant started in the reported year)",
+};
+const TAX_HELP = {
+  "Tax holiday": "reported tax is under 2% of pre-tax profit", "Partly exempt": "reported tax is 2% to 17% of pre-tax profit",
+  "Taxed": "reported tax is 17% or more of pre-tax profit", "Loss-making": "no profit, so no tax base",
+  "Tax credit": "profitable with a negative (deferred) tax provision", "No data": "no full-year figures yet",
 };
 const flagText = flags => flags && flags.length ? flags.map(f => FLAG_TEXT[f] || f).join(", ") : "–";
 const pct = (v, d = 1) => (v === null || v === undefined) ? "–" : fmt(v, d) + "%";
+const arrow = (a, b, d) => (b === null || b === undefined) ? (a === null || a === undefined ? "–" : fmt(a, d) + " → –") : `${fmt(a, d)} → ${fmt(b, d)}`;
+function taxCell(r) {
+  const label = el("span", { title: TAX_HELP[r.tax_status] || "" }, r.tax_status);
+  return r.tax_holiday_note ? el("span", {}, label, el("br"), el("small", {}, "report: " + r.tax_holiday_note)) : label;
+}
 let financeRows = [];
 
 function kpi(label, value, note) {
   return el("div", { class: "card kpi" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value), el("div", { class: "note" }, note || ""));
 }
+const controls = () => Object.fromEntries(new FormData(document.getElementById("fin-controls")).entries());
+let usageChart = null, quarterChart = null;
 
 async function loadForecast() {
-  const data = await api("/api/income/forecast");
+  const c = controls();
+  const data = await api("/api/income/forecast", { repay_pct: c.repay_pct, retention_pct: c.retention_pct });
   const a = data.assumptions, t = data.totals;
+  const everyone = data.companies.concat(data.others);
   document.getElementById("kpis").replaceChildren(
-    kpi("Companies with an operating plant", fmt(t.companies), "NEPSE-listed"),
+    kpi("NEPSE-listed hydropower companies", fmt(everyone.length), fmt(t.companies) + " with an operating plant"),
     kpi("Operating capacity", fmt(t.capacity_mw, 0) + " MW", "owned or developed by those companies"),
     kpi("Forecast income, " + (a.forecast_fiscal_year || "next year"), npr(t.annual_income_npr), "NPR, estimated"),
     kpi("Average capacity usage", pct(t.avg_usage_pct), "wet " + pct(t.wet_usage_pct) + " · dry " + pct(t.dry_usage_pct) + ", day-weighted"));
@@ -66,64 +84,77 @@ async function loadForecast() {
     `Model: annual capacity factor ${fmt(a.capacity_factor * 100, 0)}%, ${fmt(a.dry_energy_share * 100, 0)}% of energy in the dry season. ` +
     `Fallback tariff ${a.fallback_wet_tariff} / ${a.fallback_dry_tariff} NPR/kWh where no verified PPA rate exists. ` +
     `"Calibration" is reported FY ${a.reported_fiscal_year || "–"} sales ÷ modelled income, limited to ${a.calibration_range[0]}–${a.calibration_range[1]}. ` +
+    `Forecast net profit = reported profit + (income change − finance-cost change) × (1 − the company's own tax rate), with operating costs held fixed; ` +
+    `forecast EPS = that ÷ shares, and forecast book value per share adds the ${a.retention_pct}% of profit retained. ` +
+    `The finance cost falls as ${a.repay_pct}% of the loan is repaid. A dash means the company has no reported sales or full-year figures to anchor on. ` +
     `"Profit-shape gap" compares each quarter's share of reported FY ${a.reported_fiscal_year || "–"} profit with its share of modelled income, in percentage points: only a rough hint, because profit is more seasonal than income when costs are fixed.`;
+  const tally = {};
+  everyone.forEach(r => { tally[r.tax_status] = (tally[r.tax_status] || 0) + 1; });
+  document.getElementById("tax-tally").textContent = "Tax status of all " + everyone.length + " companies, read from each one's reported FY " +
+    (a.reported_fiscal_year || "–") + " tax provision: " + Object.entries(tally).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(" · ") + ".";
 
   const top = [...data.companies].sort((x, y) => y.capacity_mw - x.capacity_mw).slice(0, 15);
   const series = CHART_SERIES();
-  new Chart("c-usage", { type: "bar",
-    data: { labels: top.map(c => c.symbol), datasets: [
-      { label: "Wet season", data: top.map(c => c.wet_usage_pct), backgroundColor: series[0] },
-      { label: "Dry season", data: top.map(c => c.dry_usage_pct), backgroundColor: series[1] },
-      { label: "Average", data: top.map(c => c.avg_usage_pct), backgroundColor: series[2] }] },
+  if (usageChart) usageChart.destroy();
+  usageChart = new Chart("c-usage", { type: "bar",
+    data: { labels: top.map(x => x.symbol), datasets: [
+      { label: "Wet season", data: top.map(x => x.wet_usage_pct), backgroundColor: series[0] },
+      { label: "Dry season", data: top.map(x => x.dry_usage_pct), backgroundColor: series[1] },
+      { label: "Average", data: top.map(x => x.avg_usage_pct), backgroundColor: series[2] }] },
     options: baseChartOptions({ scales: { y: { title: { display: true, text: "% of installed capacity" }, beginAtZero: true } } }) });
 
-  const perQuarter = data.quarters.map((_, i) => data.companies.reduce((sum, c) => sum + c.quarters[i].income_npr, 0));
-  new Chart("c-quarters", { type: "bar",
+  const perQuarter = data.quarters.map((_, i) => data.companies.reduce((sum, x) => sum + x.quarters[i].income_npr, 0));
+  if (quarterChart) quarterChart.destroy();
+  quarterChart = new Chart("c-quarters", { type: "bar",
     data: { labels: data.quarters, datasets: [{ data: perQuarter, backgroundColor: series[0] }] },
     options: baseChartOptions({ plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => npr(ctx.parsed.y) + " NPR" } } },
                                 scales: { y: { ticks: { callback: v => npr(v) } } } }) });
 
-  const qCols = data.quarters.map((label, i) => ({ label: label.split(" ").pop(), num: true, render: r => npr(r.quarters[i].income_npr) }));
+  const quarterOf = (r, i) => r.quarters ? npr(r.quarters[i].income_npr) : "–";
+  const qCols = data.quarters.map((label, i) => ({ label: label.split(" ").pop(), num: true, render: r => quarterOf(r, i) }));
   renderTable(document.getElementById("rank"), [
-    { label: "#", num: true, key: "rank" },
+    { label: "#", num: true, render: r => r.rank === undefined ? "–" : String(r.rank) },
     { label: "Company", render: r => companyLink(r.company_id, r.symbol + " · " + r.name) },
-    { label: "MW", num: true, render: r => fmt(r.capacity_mw, 1) },
+    { label: "Tax status", render: taxCell },
+    { label: "MW", num: true, render: r => r.capacity_mw === undefined ? "–" : fmt(r.capacity_mw, 1) },
     { label: "Wet usage", num: true, render: r => pct(r.wet_usage_pct) },
     { label: "Dry usage", num: true, render: r => pct(r.dry_usage_pct) },
     { label: "Average usage", num: true, render: r => pct(r.avg_usage_pct) },
     ...qCols,
-    { label: "Annual income", num: true, render: r => npr(r.annual_income_npr) },
-    { label: "Calibration", num: true, render: r => r.calibration.basis === "reported_sales" ? "×" + fmt(r.calibration.factor, 2) : "none" },
+    { label: "Annual income", num: true, render: r => r.annual_income_npr === undefined ? "–" : npr(r.annual_income_npr) },
+    { label: "EPS reported → forecast", num: true, render: r => arrow(r.eps_reported, r.eps_forecast, 2) },
+    { label: "Book value/share reported → forecast", num: true, render: r => arrow(r.bvps_reported, r.bvps_forecast, 1) },
+    { label: "Calibration", num: true, render: r => !r.calibration ? "–" : r.calibration.basis !== "reported_sales" ? "none" :
+        "×" + fmt(r.calibration.factor, 2) + ((r.calibration.raw_factor !== null && Math.abs(r.calibration.raw_factor - r.calibration.factor) > 0.005) ? " (raw ×" + fmt(r.calibration.raw_factor, 2) + ")" : "") },
     { label: "Profit-shape gap (pp)", num: true, render: r => r.profit_shape_gap_pp === null || r.profit_shape_gap_pp === undefined ? "–" : fmt(r.profit_shape_gap_pp, 1) },
-    { label: "Notes", render: r => flagText(r.flags) },
-  ], data.companies, { empty: "No listed company has an operating plant with capacity." });
+    { label: "Notes", render: r => flagText([...(r.flags || []), ...(r.forecast_flags || [])]) },
+  ], everyone, { empty: "No NEPSE-listed hydropower company on record." });
 }
 
 async function loadFinance() {
-  const form = document.getElementById("fin-controls");
-  const params = Object.fromEntries(new FormData(form).entries());
-  const data = await api("/api/finance/impact", params);
+  const data = await api("/api/finance/impact", controls());
   financeRows = data.companies;
   const a = data.assumptions;
   document.getElementById("fin-note").textContent =
     `Scenario: rate ${a.rate_delta_pp > 0 ? "+" : ""}${a.rate_delta_pp} points, ${a.repay_pct}% of the loan repaid each year, ${a.retention_pct}% of extra profit retained, ${a.years}-year horizon. ` +
-    `Companies are ordered by finance cost as a share of forecast income (heaviest first).`;
+    `Companies are ordered by finance cost as a share of forecast income (heaviest first); companies with no reported loans or full-year figures come last.`;
   renderTable(document.getElementById("fin"), [
     { label: "Company", render: r => el("button", { type: "button", class: "sort-btn", title: "Show plant allocation", onclick: () => showPlants(r) }, r.symbol + " · " + r.name) },
+    { label: "Tax status", render: r => el("span", { title: TAX_HELP[r.tax_status] || "" }, r.tax_status) },
     { label: "Loans", num: true, render: r => npr(r.loans) },
     { label: "Implied rate", num: true, render: r => pct(r.implied_rate_pct) },
     { label: "Finance cost", num: true, render: r => npr(r.finance_cost) },
     { label: "% of income", num: true, render: r => pct(r.burden_pct) },
     { label: "Interest cover", num: true, render: r => r.interest_cover === null ? "–" : fmt(r.interest_cover, 1) + "×" },
     { label: "Year-1 saving", num: true, render: r => r.scenario ? npr(r.scenario.years[0].saving) : "–" },
-    { label: "EPS now → year 1", num: true, render: r => r.scenario && r.scenario.eps_after_year1 !== null ? `${fmt(r.scenario.eps_baseline, 2)} → ${fmt(r.scenario.eps_after_year1, 2)}` : "–" },
-    { label: "Book value/share now → end", num: true, render: r => r.scenario && r.scenario.bvps_after_horizon !== null ? `${fmt(r.scenario.bvps_baseline, 1)} → ${fmt(r.scenario.bvps_after_horizon, 1)}` : "–" },
+    { label: "EPS reported → year 1 with rate change", num: true, render: r => r.scenario && r.scenario.eps_after_year1 !== null ? `${fmt(r.scenario.eps_baseline, 2)} → ${fmt(r.scenario.eps_after_year1, 2)}` : "–" },
+    { label: "Book value/share reported → end of horizon", num: true, render: r => r.scenario && r.scenario.bvps_after_horizon !== null ? `${fmt(r.scenario.bvps_baseline, 1)} → ${fmt(r.scenario.bvps_after_horizon, 1)}` : "–" },
     { label: "Notes", render: r => flagText(r.flags) },
   ], financeRows, { empty: "No company has reported loans." });
 }
 
 function showPlants(row) {
-  document.getElementById("plant-title").textContent = "Plant allocation: " + row.symbol + " (FY " + row.fiscal_year + ")";
+  document.getElementById("plant-title").textContent = "Plant allocation: " + row.symbol + (row.fiscal_year ? " (FY " + row.fiscal_year + ")" : "");
   renderTable(document.getElementById("plants"), [
     { label: "Plant", render: p => projectLink(p.project_id, p.plant) },
     { label: "MW", num: true, render: p => fmt(p.mw, 1) },
@@ -136,6 +167,7 @@ function showPlants(row) {
 document.getElementById("fin-controls").addEventListener("submit", e => {
   e.preventDefault();
   loadFinance().catch(err => showError(document.getElementById("fin"), err));
+  loadForecast().catch(err => showError(document.getElementById("rank"), err));
 });
 loadForecast().catch(err => showError(document.getElementById("rank"), err));
 loadFinance().catch(err => showError(document.getElementById("fin"), err));

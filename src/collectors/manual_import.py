@@ -75,13 +75,15 @@ def get_or_create_company(session: Session, name: str | None) -> Company | None:
     """Find a company by normalised name (so 'Himal Power Ltd.' == 'Himal Power Limited') or create it."""
     if not name:
         return None
+    def flat(text: str) -> str:  # 'Nilgirikhola' == 'Nilgiri Khola': spacing differs between sources
+        return company_key(text).replace(" ", "")
     index = session.info.get("company_index")
     if index is None:
-        index = {company_key(c.company_name): c for c in session.scalars(select(Company))}
+        index = {flat(c.company_name): c for c in session.scalars(select(Company))}
         session.info["company_index"] = index
     variants = session.info.setdefault("company_variants", load_company_variants())
     key = company_key(name)
-    key = variants.get(key, key)
+    key = flat(variants.get(key, key))
     company = index.get(key)
     if company is None:
         ctype = CompanyType.NEA if name == NEA_NAME else CompanyType.IPP

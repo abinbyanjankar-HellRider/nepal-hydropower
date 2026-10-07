@@ -51,6 +51,33 @@ def test_company_normalisation():
     assert c.company_key("Himal Power Ltd.") == c.company_key("Himal Power Limited")
 
 
+def test_company_names_containing_and_or_ampersand_are_not_cut_in_half():
+    """Regression (QA I4): 19 promoters were truncated, e.g. Upper Trishuli-1's developer became 'Nepal Water'."""
+    for full in ("Nepal Water & Energy Development Co. P. Ltd", "Research & Development Group",
+                 "Himal Hydro and General Construction Ltd.", "KCs Hotel and Multiple Industries P Ltd",
+                 "Swet Ganga Hydropower & Construction Limited", "Apex Hydro and Investment Pvt. Ltd."):
+        assert c.normalize_company_name(full) == full, full
+
+
+def test_company_lists_still_keep_only_the_first_company_and_drop_address_text():
+    assert c.normalize_company_name("Himal Power Ltd. and Sanima Hydro Ltd") == "Himal Power Ltd."
+    assert c.normalize_company_name("Alpha Pvt. Ltd; Beta Pvt. Ltd") == "Alpha Pvt. Ltd"
+    assert c.normalize_company_name("United Modi Hydropower Pvt. Ltd., 1st Floor Heritage Plaza 2; Kamaladi") == \
+        "United Modi Hydropower Pvt. Ltd."
+    assert c.normalize_company_name("Electrocom and Research Centre, 9851003846") == "Electrocom and Research Centre"
+
+
+def test_series_letters_ka_and_kha_stay_distinct_but_spelling_variants_still_fold():
+    """Regression (QA I3): 'Budhi Gandaki Ka' and 'Kha' folded to the same name; '11' folded to '1'."""
+    assert c.name_tokens("Budhi Gandaki Ka") != c.name_tokens("Budhi Gandaki Kha")
+    assert c.name_tokens("Budhi Gandaki Ga") != c.name_tokens("Budhi Gandaki Gha")
+    assert c.name_tokens("Khimti 11") != c.name_tokens("Khimti 1")
+    assert c.name_tokens("Project 100 MW") != c.name_tokens("Project 10 MW")
+    assert c.name_tokens("Trisuli") == c.name_tokens("Trishuli")                     # existing behaviour kept
+    assert c.name_tokens("Budi Gandaki") == c.name_tokens("Budhi Gandaki")
+    assert {"kha"} <= set(c.discriminators(c.name_tokens("Budhi Gandaki Kha")))
+
+
 def test_parse_helpers():
     assert c.parse_capacity("1,234.5 MW") == 1234.5
     assert c.parse_capacity(None) is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from ..models import Company, District, Project, ProjectStatus, River
@@ -31,6 +31,7 @@ def load_projects_df(session: Session) -> pd.DataFrame:
             Project.river_name_raw, River.river_name.label("river_linked"), Project.commissioning_year, Project.expected_completion_year,
             Project.license_type, Project.license_expiry_date, Project.latitude, Project.longitude,
             Project.annual_energy_generation_gwh, Project.ppa_rate_npr_per_kwh, Project.data_reliability,
+            func.coalesce(Project.owner_company_id, Project.developer_company_id).label("company_id"),
             dev.company_name.label("developer"), dev.stock_symbol.label("developer_symbol"),
             own.company_name.label("owner"), own.stock_symbol.label("owner_symbol"),
         )

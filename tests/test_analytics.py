@@ -84,6 +84,50 @@ def test_revenue_estimate_uses_project_energy_when_known(df):
     assert by.loc["HP_2", "est_revenue_npr_m"] == pytest.approx(by.loc["HP_2", "est_energy_gwh"] * 5, rel=1e-3)
 
 
+def _plants():
+    return pd.DataFrame([
+        dict(project_id="P1", name="One", status="Operational", capacity_mw=10.0, annual_energy_generation_gwh=None,
+             ppa_rate_npr_per_kwh=None, developer="A", symbol="A", company_id=1),
+        dict(project_id="P2", name="Two", status="Operational", capacity_mw=10.0, annual_energy_generation_gwh=None,
+             ppa_rate_npr_per_kwh=None, developer="B", symbol="B", company_id=2),
+        dict(project_id="P3", name="Three", status="Operational", capacity_mw=10.0, annual_energy_generation_gwh=None,
+             ppa_rate_npr_per_kwh=None, developer="C", symbol="C", company_id=3),
+        dict(project_id="P4", name="Four", status="Operational", capacity_mw=10.0, annual_energy_generation_gwh=None,
+             ppa_rate_npr_per_kwh=5.5, developer="D", symbol="D", company_id=4)])
+
+
+def test_revenue_estimate_prices_plants_at_verified_ppa_rates_and_says_which(df):
+    """QA: projects.ppa_rate_npr_per_kwh is empty, so every plant was priced at the assumed tariff and ignored the
+    verified PPA rates that the /income page uses."""
+    rates = {(1, "P1"): (4.0, 7.0), (2, None): (4.8, 8.4)}
+    est = fin.estimate_revenue_df(_plants(), capacity_factor=0.5, dry_share=0.3, rates=rates).set_index("project_id")
+    assert est.loc["P1", "tariff_npr_kwh"] == pytest.approx(4.0 * 0.7 + 7.0 * 0.3) and est.loc["P1", "tariff_basis"] == "verified project"
+    assert est.loc["P2", "tariff_npr_kwh"] == pytest.approx(4.8 * 0.7 + 8.4 * 0.3) and est.loc["P2", "tariff_basis"] == "verified company"
+    assert est.loc["P3", "tariff_basis"] == "assumed"                      # no verified rate for company 3
+    assert est.loc["P4", "tariff_npr_kwh"] == 5.5 and est.loc["P4", "tariff_basis"] == "project record"
+
+
+def test_revenue_estimate_without_rates_is_all_assumed_as_before():
+    est = fin.estimate_revenue_df(_plants(), capacity_factor=0.5, dry_share=0.3)
+    assert set(est["tariff_basis"]) == {"assumed", "project record"}
+
+
+def test_excel_links_the_assumption_cell_only_to_truly_assumed_tariffs():
+    """QA: a plant whose verified tariff happened to equal the assumed blend (4.8/8.4) was tied to the assumption cell."""
+    from openpyxl import Workbook
+    from src.exports.excel_builder import _link_financial_formulas
+    est = fin.estimate_revenue_df(_plants().iloc[1:3], rates={(2, None): (4.8, 8.4)})     # P2 verified 5.88, P3 assumed 5.88
+    assert est.loc[est["project_id"] == "P2", "tariff_npr_kwh"].iloc[0] == est.loc[est["project_id"] == "P3", "tariff_npr_kwh"].iloc[0]
+    ws = Workbook().active
+    _link_financial_formulas(ws, est)
+    assert ws.cell(4, 5).value is None                          # P2: verified, stays a value (set by the data sheet)
+    assert ws.cell(5, 5).value == "=Assumptions!$B$7"           # P3: truly assumed, live link
+
+
+def test_projects_frame_carries_the_company_id(df):
+    assert "company_id" in df.columns and df["company_id"].notna().any()
+
+
 def test_irr_known_values():
     assert fin.irr([-100, 110]) == pytest.approx(0.10, abs=1e-6)
     assert fin.irr([-1000, 300, 300, 300, 300, 300]) == pytest.approx(0.1524, abs=1e-3)

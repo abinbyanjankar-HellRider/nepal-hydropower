@@ -29,6 +29,10 @@ AUTHORITATIVE_STAGES = {"powerplants", "generation", "survey"}  # i.e. DoED
 # A DoED table row is one distinct project, so one existing project can be claimed once per stage.
 # Wikipedia may list the same project in two sections, so it is exempt.
 CLAIMING_STAGES = AUTHORITATIVE_STAGES
+# A generation licence outranks a survey licence: a project that holds one is not the project of a survey-licence row.
+LICENCE_RANK = {"Survey": 0, "Generation": 1}
+# Rows a person entered or corrected: a scrape may fill their blanks but never overwrite them or lower their reliability.
+PROTECTED_RELIABILITY = {"manual", "csv-import", "verified"}
 
 
 @dataclass
@@ -89,11 +93,16 @@ class _Matcher:
 
     @staticmethod
     def _licence_conflict(e: _Entry, rec: dict) -> bool:
-        """Two different numeric licence numbers of the same type belong to two different licensed projects, however alike the names."""
+        """Two different numeric licence numbers of the same type belong to two different licensed projects, however
+        alike the names. A project holding a higher-ranked licence (generation) is also not the project of an incoming
+        lower-ranked one (survey): the reverse, a survey project later licensed for generation, is normal progression."""
         lic, ltype = rec.get("license_number"), rec.get("license_type")
         p = e.project
-        return bool(lic and lic.isdigit() and ltype and p.license_type == ltype
-                    and p.license_number and p.license_number.isdigit() and p.license_number != lic)
+        if not (lic and lic.isdigit() and ltype and p.license_number and p.license_number.isdigit()):
+            return False
+        if p.license_type == ltype:
+            return p.license_number != lic
+        return LICENCE_RANK.get(p.license_type, -1) > LICENCE_RANK.get(ltype, -1)
 
     def find(self, rec: dict, stage: str) -> Project | None:
         ordered = name_tokens(rec["project_name_en"])
@@ -122,10 +131,13 @@ class _Matcher:
         # 1. identical folded name, similar capacity
         # Same name and near-identical capacity: districts may legitimately disagree between sources
         # (projects straddle boundaries), so they only matter when the capacity is looser.
-        hit = closest([e for e in free if (e.key == key or e.flat == flat)
-                       and (_cap_close(e.project.capacity_mw, cap, 0.03)
-                            or (_cap_close(e.project.capacity_mw, cap, 0.15)
-                                and self._district_ok(e, rec.get("district"))[0]))])
+        same_name = [e for e in free if (e.key == key or e.flat == flat)
+                     and (_cap_close(e.project.capacity_mw, cap, 0.03)
+                          or (_cap_close(e.project.capacity_mw, cap, 0.15)
+                              and self._district_ok(e, rec.get("district"))[0]))]
+        if cap is None and len(same_name) != 1:  # no capacity to tell same-named projects apart: only a unique name matches
+            same_name = []
+        hit = closest(same_name)
         if hit:
             return hit
 
@@ -198,16 +210,17 @@ def sync_records(session: Session, records: list[dict]) -> SyncResult:
             matcher.add(project)
             result.created += 1
         else:
+            protected = project.data_reliability in PROTECTED_RELIABILITY
             for k, v in values.items():
                 cur = getattr(project, k)
-                if cur is not None and cur != v and _material(k, cur, v):
+                if cur is not None and cur != v and (_material(k, cur, v) or (protected and authoritative)):
                     result.conflicts.append(
                         f"{project.project_id} {project.project_name_en}: {k} {cur} vs {v} ({source})")
-                if authoritative or cur is None:
+                if (authoritative and not protected) or cur is None:
                     setattr(project, k, v)
             if STATUS_RANK.get(rec["status"], -1) > STATUS_RANK.get(project.status, -1):
                 project.status = rec["status"]
-            if authoritative:
+            if authoritative and not protected:
                 project.data_reliability = "doed"
             elif project.data_reliability in (None, "seed-unverified"):
                 project.data_reliability = "wikipedia"  # a scrape has now corroborated the seed row

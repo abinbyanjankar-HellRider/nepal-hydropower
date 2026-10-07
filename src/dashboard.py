@@ -222,8 +222,10 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
 
     @app.get("/api/income/forecast")
     def api_income_forecast():
+        repay = float_arg("repay_pct", finance_cost.DEFAULT_REPAY_PCT, 0, 50)
+        retention = float_arg("retention_pct", finance_cost.DEFAULT_RETENTION_PCT, 0, 100)
         with db.session_scope() as s:
-            return jsonify(json_safe(income.forecast(s)))
+            return jsonify(json_safe(finance_cost.enrich_forecast(s, income.forecast(s), repay, retention)))
 
     @app.get("/api/finance/impact")
     def api_finance_impact():

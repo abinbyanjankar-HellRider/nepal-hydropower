@@ -31,6 +31,7 @@ _NAME_NOISE = re.compile(
     r"small|mini|micro|ltd|limited|pvt|the|of|cascade|prop|pror|ror|phase)\b|[^a-z0-9 ]", re.I)
 
 NEA_NAME = "Nepal Electricity Authority"
+_COMPANY_SUFFIX = r"(?:pvt\.?\s*ltd\.?|p\.?\s*ltd\.?|private\s+limited|limited|ltd\.?|company|co\.?|authority)"
 
 
 def strip_refs(text) -> str | None:
@@ -45,10 +46,18 @@ def strip_refs(text) -> str | None:
 _ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5"}
 
 
+SERIES_LETTERS = frozenset({"ka", "kha", "ga", "gha"})  # Nepali series suffixes ('Budhi Gandaki Ka' / 'Kha') are different projects
+
+
 def _fold(s: str) -> str:
-    """Fold Nepali transliteration variants: sh/s, dh/d, kh/k, chh/ch and doubled letters."""
-    s = re.sub(r"([bcdgjkpstz])h+", r"\1", s)
-    return re.sub(r"(.)\1+", r"\1", s)
+    """Fold Nepali transliteration variants: sh/s, dh/d, kh/k, chh/ch and doubled letters.
+    Standalone series suffixes (ka/kha, ga/gha) stay distinct and digits are never collapsed ('11' is not '1')."""
+    def fold_word(w: str) -> str:
+        if w in SERIES_LETTERS:
+            return w
+        w = re.sub(r"([bcdgjkpstz])h+", r"\1", w)
+        return re.sub(r"([a-z])\1+", r"\1", w)
+    return " ".join(fold_word(w) for w in s.split(" "))
 
 
 # Positional words that make two otherwise-identical names different projects (compared after folding).
@@ -76,7 +85,7 @@ def normalize_project_name(name: str | None) -> str:
 
 def discriminators(tokens) -> frozenset[str]:
     """Tokens that make two otherwise-similar names different projects (Upper/Lower, 1/2/3, A/B)."""
-    return frozenset(t for t in tokens if t in QUALIFIERS or t.isdigit() or len(t) <= 2)
+    return frozenset(t for t in tokens if t in QUALIFIERS or t in SERIES_LETTERS or t.isdigit() or len(t) <= 2)
 
 
 def normalize_company_name(name: str | None) -> str | None:
@@ -87,7 +96,15 @@ def normalize_company_name(name: str | None) -> str | None:
     name = re.sub(r"\([^)]*\)", "", name).strip(" ,;")  # drop '(CHPCL)' style suffixes
     if re.fullmatch(r"(nea|nepal electricity authority|nepal electric authority)", name, re.I):
         return NEA_NAME
-    first = re.split(r"\s+(?:and|&)\s+|;", name, maxsplit=1)[0].strip(" ,")
+    first = name.split(";", 1)[0].strip(" ,")
+    # address or phone text after the company's legal suffix ('... Pvt. Ltd., 1st Floor ...')
+    if m := re.match(rf"^(.*?\b{_COMPANY_SUFFIX})\s*,\s*\S", first, re.I):
+        first = m.group(1)
+    # several promoters listed together ('A Ltd and B Ltd'): keep the first. 'and'/'&' only separates companies when
+    # what precedes it already ends in a legal suffix, so 'Nepal Water & Energy Development Co. P. Ltd' stays whole.
+    if m := re.match(rf"^(.*?\b{_COMPANY_SUFFIX})\s+(?:and|&)\s+\S", first, re.I):
+        first = m.group(1)
+    first = re.sub(r"\s*,\s*[\d\s,+/-]{6,}$", "", first).strip(" ,")  # trailing phone numbers
     return first or None
 
 

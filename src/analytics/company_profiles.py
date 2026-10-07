@@ -5,8 +5,6 @@ extracted from a report (unverified until confirmed), or derived: every derived 
 """
 from __future__ import annotations
 
-from collections import Counter
-
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -34,7 +32,14 @@ def tax_status(fin_row: CompanyFinancial | None, facts: list[CompanyFact]) -> di
     out = {"label": "Unknown", "effective_rate_pct": None, "basis": "no financials loaded", "report_mentions": mentions}
     if fin_row and fin_row.tax_provision_npr is not None and fin_row.net_profit_npr is not None:
         pre_tax = fin_row.net_profit_npr + fin_row.tax_provision_npr
-        if pre_tax > 0:
+        if fin_row.net_profit_npr <= 0 or pre_tax <= 0:
+            out["label"] = "Loss-making"
+            out["basis"] = f"no profit after tax in FY {fin_row.fiscal_year} Q{fin_row.quarter}, so no tax base to read"
+        elif fin_row.tax_provision_npr < 0:
+            out["label"] = "Tax credit (not a holiday)"
+            out["basis"] = (f"profitable with a negative (deferred) tax provision in FY {fin_row.fiscal_year} Q{fin_row.quarter}; "
+                            "a credit, not an exemption")
+        elif pre_tax > 0:
             rate = fin_row.tax_provision_npr / pre_tax
             out["effective_rate_pct"] = round(rate * 100, 1)
             out["label"] = ("Tax-free (holiday)" if rate < TAX_FREE_BELOW
@@ -46,13 +51,20 @@ def tax_status(fin_row: CompanyFinancial | None, facts: list[CompanyFact]) -> di
     return out
 
 
-def _pick_fact(facts: list[CompanyFact], fact_type: str) -> dict | None:
-    """The most frequently reported value of a fact type (ties: latest fiscal year)."""
+def _pick_fact(facts: list[CompanyFact], fact_type: str, mw_by_project: dict | None = None) -> dict | None:
+    """The most frequently reported value of a fact type. Ties go to the value tied to the most capacity (a fact
+    linked to a plant weighs that plant's MW; a company-level fact weighs the company's total, key None), then to the
+    latest fiscal year, so wet and dry rates of a multi-plant company come from the same, largest plant."""
     cand = [f for f in facts if f.fact_type == fact_type and f.value_num is not None]
     if not cand:
         return None
-    common = Counter(f.value_num for f in cand).most_common(1)[0][0]
-    best = max((f for f in cand if f.value_num == common), key=lambda f: f.fiscal_year or "")
+    mw = mw_by_project or {}
+    weight = lambda f: mw.get(f.project_id, 0) or 0
+    by_value: dict[float, list[CompanyFact]] = {}
+    for f in cand:
+        by_value.setdefault(f.value_num, []).append(f)
+    common = max(by_value, key=lambda v: (len(by_value[v]), sum(weight(f) for f in by_value[v])))
+    best = max(by_value[common], key=lambda f: (weight(f), f.fiscal_year or ""))
     return {"value": best.value_num, "fiscal_year": best.fiscal_year, "page": best.page, "snippet": best.snippet,
             "verified": best.verified, "method": best.method, "report_id": best.report_id}
 
@@ -143,8 +155,10 @@ def build_profile(session: Session, company_id: int) -> dict | None:
     # Auto-extracted numbers are regex candidates on free text (one 'PPA rate' turned out to be a retail tariff), so only
     # VERIFIED values become the headline PPA rate; unverified ones are shown separately as candidates to check.
     verified = [f for f in facts if f.verified]
-    ppa = _pick_fact(verified, "ppa_rate_npr_kwh")
-    wet, dry = _pick_fact(verified, "ppa_wet_npr_kwh"), _pick_fact(verified, "ppa_dry_npr_kwh")
+    mw_by_project = {p.project_id: p.capacity_mw or 0 for p in projects}
+    mw_by_project[None] = sum(mw_by_project.values())
+    ppa = _pick_fact(verified, "ppa_rate_npr_kwh", mw_by_project)
+    wet, dry = _pick_fact(verified, "ppa_wet_npr_kwh", mw_by_project), _pick_fact(verified, "ppa_dry_npr_kwh", mw_by_project)
     escalation = next((f.value_text for f in verified if f.fact_type == "ppa_escalation"), None)
     ppa_rate = None
     if ppa:  # one flat rate
@@ -182,7 +196,7 @@ def build_profile(session: Session, company_id: int) -> dict | None:
         "loans_npr": latest.loans_npr if latest else None,
         "finance_cost_npr": latest.finance_cost_npr if latest else None,
         "finance_cost_period": f"FY {latest.fiscal_year} Q{latest.quarter} (year to date)" if latest else None,
-        "debt_to_equity": round(latest.loans_npr / equity, 2) if latest and latest.loans_npr is not None and equity else None,
+        "debt_to_equity": round(latest.loans_npr / equity, 2) if latest and latest.loans_npr is not None and equity and equity > 0 else None,
         "finance_cost_pct_of_sales": round(latest.finance_cost_npr / latest.electricity_sales_npr * 100, 1)
         if latest and latest.finance_cost_npr is not None and latest.electricity_sales_npr else None,
         "electricity_sales_npr": reported_revenue, "net_profit_npr": latest.net_profit_npr if latest else None,

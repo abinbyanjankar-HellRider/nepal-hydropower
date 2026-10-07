@@ -349,3 +349,48 @@ def test_verified_seasonal_ppa_is_shown_as_wet_and_dry_with_a_blended_table_figu
     assert ppa["npr_per_kwh"] == pytest.approx(3.63 * 0.7 + 6.96 * 0.3, abs=0.01) and "nine years" in ppa["escalation"]
     assert m["ppa_candidate"] is None  # a verified rate exists, so the unverified candidate is not offered
     assert row["ppa_text"] == ppa["text"] and row["ppa_rate"] == ppa["npr_per_kwh"]
+
+
+def _fin(net_profit, tax):
+    from src.models import CompanyFinancial
+    return CompanyFinancial(company_id=1, fiscal_year="2082/83", quarter=4, net_profit_npr=net_profit, tax_provision_npr=tax)
+
+
+def test_tax_label_tells_a_tax_credit_and_a_loss_apart_from_a_holiday():
+    """Regression (QA I7): a profitable company with a negative tax provision (AKPL, DORDI, CHL) read 'Tax-free (holiday)'."""
+    assert cp.tax_status(_fin(30e6, -9e6), [])["label"] == "Tax credit (not a holiday)"
+    assert cp.tax_status(_fin(-20e6, 5e6), [])["label"] == "Loss-making"
+    assert cp.tax_status(_fin(1.7e6, -6.7e6), [])["label"] == "Loss-making"          # profit only thanks to the credit
+    assert cp.tax_status(_fin(200e6, 0.0), [])["label"] == "Tax-free (holiday)"
+    assert cp.tax_status(_fin(150e6, 50e6), [])["label"] == "Taxable"
+
+
+def test_debt_to_equity_is_unknown_when_equity_is_not_positive(profile_db):
+    """Regression (QA I8): MCHL's negative equity gave a debt-to-equity of -8.43, so it ranked as the least indebted."""
+    from src.analytics.company_trends import _full_metrics
+    from src.models import CompanyFinancial
+    row = CompanyFinancial(company_id=1, fiscal_year="2082/83", quarter=4, paid_up_capital_npr=100e6,
+                           reserves_npr=-150e6, loans_npr=400e6, net_profit_npr=-5e6, tax_provision_npr=0.0)
+    assert _full_metrics(row)["debt_to_equity"] is None
+    row.reserves_npr = 50e6
+    assert _full_metrics(row)["debt_to_equity"] == pytest.approx(400 / 150, abs=0.01)
+    db, cid = profile_db
+    with db.session_scope() as s:
+        for r in s.query(CompanyFinancial).filter_by(company_id=cid):
+            r.reserves_npr = -2e9
+    with db.session_scope() as s:
+        assert cp.build_profile(s, cid)["metrics"]["debt_to_equity"] is None
+
+
+def test_headline_ppa_pair_comes_from_the_largest_plant_not_the_first_stored(profile_db):
+    """Regression (QA I9): with several plants the headline rate was whichever fact was stored first, and wet and dry
+    could come from different plants."""
+    db, cid = profile_db          # HP_1 is 50 MW, HP_2 is 100 MW
+    with db.session_scope() as s:
+        for pid, wet, dry in (("HP_1", 4.0, 7.0), ("HP_2", 4.8, 8.4)):
+            for ftype, value in (("ppa_wet_npr_kwh", wet), ("ppa_dry_npr_kwh", dry)):
+                s.add(CompanyFact(company_id=cid, project_id=pid, fact_type=ftype, value_num=value, verified=True,
+                                  method="manual", fiscal_year="2080/81"))
+    with db.session_scope() as s:
+        ppa = cp.build_profile(s, cid)["metrics"]["ppa_rate"]
+    assert (ppa["wet"], ppa["dry"]) == (4.8, 8.4)

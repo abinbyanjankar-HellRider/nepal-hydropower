@@ -41,7 +41,7 @@ def _full_metrics(r: CompanyFinancial | None) -> dict:
     return {
         "period": f"FY {r.fiscal_year} Q{r.quarter}", "electricity_sales_npr": r.electricity_sales_npr,
         "operating_income_npr": r.operating_income_npr, "finance_cost_npr": r.finance_cost_npr, "loans_npr": r.loans_npr,
-        "debt_to_equity": round(r.loans_npr / equity, 2) if r.loans_npr is not None and equity else None,
+        "debt_to_equity": round(r.loans_npr / equity, 2) if r.loans_npr is not None and equity and equity > 0 else None,
         "net_margin_pct": round(r.net_profit_npr / r.operating_income_npr * 100, 1)
         if r.net_profit_npr is not None and r.operating_income_npr else None,
         "finance_cost_pct_of_sales": round(r.finance_cost_npr / r.electricity_sales_npr * 100, 1)

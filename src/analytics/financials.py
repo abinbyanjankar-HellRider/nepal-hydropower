@@ -21,26 +21,39 @@ def estimate_energy_gwh(capacity_mw: float, capacity_factor: float) -> float:
 
 def estimate_revenue_df(df: pd.DataFrame, capacity_factor: float | None = None, wet_tariff: float | None = None,
                         dry_tariff: float | None = None, dry_share: float | None = None,
-                        status: str = "Operational") -> pd.DataFrame:
+                        status: str = "Operational", rates: dict | None = None) -> pd.DataFrame:
     """ESTIMATED annual energy and revenue = MW x 8760h x capacity factor x blended tariff.
 
     Uses the project's own annual_energy_generation_gwh / ppa_rate when known, otherwise the assumptions
-    in config. The `basis` column says which was used. This is a scenario tool, not reported revenue.
+    in config. The `basis` column says which energy figure was used. When `rates` (verified PPA rates from
+    income.load_ppa_rates) is given, a plant without its own rate is priced at its verified project or company rate,
+    and `tariff_basis` says which tariff applied: 'project record', 'verified project', 'verified company' or
+    'assumed'. This is a scenario tool, not reported revenue.
     """
+    from .income import resolve_rate  # local import: income depends on the models, not on this module
     cf = config.ASSUMED_CAPACITY_FACTOR if capacity_factor is None else capacity_factor
+    share = config.ASSUMED_DRY_SEASON_ENERGY_SHARE if dry_share is None else dry_share
     tariff = blended_tariff(
         config.ASSUMED_WET_TARIFF_NPR_PER_KWH if wet_tariff is None else wet_tariff,
-        config.ASSUMED_DRY_TARIFF_NPR_PER_KWH if dry_tariff is None else dry_tariff,
-        config.ASSUMED_DRY_SEASON_ENERGY_SHARE if dry_share is None else dry_share)
+        config.ASSUMED_DRY_TARIFF_NPR_PER_KWH if dry_tariff is None else dry_tariff, share)
     d = df[(df["status"] == status) & df["capacity_mw"].notna()].copy()
     known_energy = d["annual_energy_generation_gwh"].notna()
     d["est_energy_gwh"] = d["annual_energy_generation_gwh"].where(
         known_energy, d["capacity_mw"].map(lambda mw: estimate_energy_gwh(mw, cf)))
-    d["tariff_npr_kwh"] = d["ppa_rate_npr_per_kwh"].fillna(tariff)
+    tariffs, bases = [], []
+    company_ids = d["company_id"] if "company_id" in d.columns else pd.Series([None] * len(d), index=d.index)
+    for own_rate, company_id, project_id in zip(d["ppa_rate_npr_per_kwh"], company_ids, d["project_id"]):
+        if pd.notna(own_rate):
+            tariffs.append(own_rate), bases.append("project record")
+        elif rates and pd.notna(company_id) and (found := resolve_rate(rates, int(company_id), project_id)).basis != "assumed":
+            tariffs.append(blended_tariff(found.wet, found.dry, share)), bases.append(f"verified {found.basis}")
+        else:
+            tariffs.append(tariff), bases.append("assumed")
+    d["tariff_npr_kwh"], d["tariff_basis"] = tariffs, bases
     d["est_revenue_npr_m"] = d["est_energy_gwh"] * d["tariff_npr_kwh"]  # GWh x NPR/kWh = NPR million
     d["basis"] = known_energy.map({True: "project energy figure", False: f"assumed CF {cf:.0%}"})
     return d[["project_id", "name", "capacity_mw", "est_energy_gwh", "tariff_npr_kwh", "est_revenue_npr_m",
-              "basis", "developer", "symbol"]].round(2)
+              "basis", "developer", "symbol", "tariff_basis"]].round(2)
 
 
 def financial_history(session: Session, project_id: str) -> pd.DataFrame:

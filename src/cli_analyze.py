@@ -172,9 +172,13 @@ def company_cmd(query):
 @click.option("--top", default=20, show_default=True)
 def revenue(capacity_factor, wet_tariff, dry_tariff, dry_share, top):
     """ESTIMATED annual revenue for operational projects (scenario tool, not reported revenue)."""
-    est = fin.estimate_revenue_df(_df(), capacity_factor, wet_tariff, dry_tariff, dry_share)
-    console.print("[yellow]Estimates use assumed tariffs and capacity factors (see src/config.py); "
-                  "they are not reported figures.[/yellow]")
+    from .analytics import income
+    with db_manager.session_scope() as s:
+        rates = income.load_ppa_rates(s)
+    est = fin.estimate_revenue_df(_df(), capacity_factor, wet_tariff, dry_tariff, dry_share, rates=rates)
+    verified = int(est["tariff_basis"].isin(["verified project", "verified company"]).sum())
+    console.print(f"[yellow]Estimates use assumed capacity factors (see src/config.py); {verified} of {len(est)} plants are "
+                  "priced at a verified PPA rate and the rest at the assumed tariff. They are not reported figures.[/yellow]")
     console.print(f"Total estimated: {est['est_energy_gwh'].sum():,.0f} GWh, "
                   f"NPR {est['est_revenue_npr_m'].sum() / 1000:,.1f} billion/year across {len(est)} plants")
     show(est.sort_values("est_revenue_npr_m", ascending=False), "Estimated annual revenue (NPR million)", top)

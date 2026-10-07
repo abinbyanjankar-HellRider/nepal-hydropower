@@ -267,3 +267,83 @@ def test_company_name_variants_file_keeps_one_promoter_spelled_two_ways_as_one_c
         b = get_or_create_company(s, "Sanjen Jalvidhyut Co")
         assert a.company_id == b.company_id
         assert get_or_create_company(s, "Sanjen Hydro Co").company_id != a.company_id  # unrelated names are untouched
+
+
+def test_promoter_spelled_with_and_without_a_space_is_one_company(db):
+    """Regression (QA I5): 'Nilgirikhola' and 'Nilgiri Khola' became two company records."""
+    from src.collectors.manual_import import get_or_create_company
+    with db.session_scope() as s:
+        a = get_or_create_company(s, "Nilgiri Khola Hydropower Company Pvt. Ltd.")
+        b = get_or_create_company(s, "Nilgirikhola Hydropower Company Limited")
+        c = get_or_create_company(s, "Omega Energy Developer Pvt. Ltd")
+        d = get_or_create_company(s, "Omega EnergyDeveloper Pvt. Ltd")
+        assert a.company_id == b.company_id and c.company_id == d.company_id and a.company_id != c.company_id
+
+
+def test_a_survey_licence_row_never_overwrites_a_generation_licensed_project(db):
+    """Regression (QA C1): Sabha Khola A (generation licence 128) was overwritten by the unrelated survey-licence
+    project 'Sabha A Hydropower Project' (licence 1282), and Sani Bheri HEP (389) by 'Rukum Sani Bheri' (1457)."""
+    recs = [
+        _rec("Sabha Khola A", 10.4, "generation", ProjectStatus.LICENSED, district="Sankhuwasabha",
+             license_number="128", license_type="Generation", developer="Deepsabha Hydropower Pvt. Ltd."),
+        _rec("Sabha A Hydropower Project", 9.0, "survey", ProjectStatus.PLANNED, district="Sankhuwasabha",
+             license_number="1282", license_type="Survey", developer="Standard H. Energy Pvt. Ltd."),
+        _rec("Sani Bheri HEP", 44.52, "generation", ProjectStatus.LICENSED, district="Rukum",
+             license_number="389", license_type="Generation", developer="Expert Hydro Investment Pvt. Ltd"),
+        _rec("Rukum Sani Bheri Hydropower Project", 45.0, "survey", ProjectStatus.PLANNED, district="Rukum",
+             license_number="1457", license_type="Survey", developer="O.S.R. Hydro Pvt. Ltd."),
+    ]
+    with db.session_scope() as s:
+        res = sync_records(s, recs)
+        assert res.created == 4 and res.updated == 0
+        held = {(p.license_type, p.license_number): p for p in s.scalars(select(Project))}
+        assert held[("Generation", "128")].capacity_mw == 10.4 and held[("Generation", "389")].capacity_mw == 44.52
+        assert held[("Survey", "1282")].capacity_mw == 9.0 and held[("Survey", "1457")].capacity_mw == 45.0
+    with db.session_scope() as s:                      # and a second full sync changes nothing (no flip-flopping)
+        again = sync_records(s, recs)
+        assert again.created == 0
+        assert {(p.license_type, p.license_number) for p in s.scalars(select(Project))} == set(held)
+
+
+def test_a_survey_project_can_still_be_upgraded_by_its_own_generation_licence(db):
+    """The guard must not block the normal progression: the same project gets a generation licence after a survey one."""
+    with db.session_scope() as s:
+        sync_records(s, [_rec("Foo Khola", 10.0, "survey", ProjectStatus.PLANNED, district="Ilam",
+                              license_number="900", license_type="Survey")])
+    with db.session_scope() as s:
+        res = sync_records(s, [_rec("Foo Khola", 10.0, "generation", ProjectStatus.LICENSED, district="Ilam",
+                                    license_number="55", license_type="Generation")])
+        assert res.created == 0 and res.updated == 1
+        p = s.scalars(select(Project)).one()
+        assert p.license_type == "Generation" and p.license_number == "55"
+
+
+def test_a_record_without_capacity_does_not_match_an_arbitrary_same_named_project(db):
+    """Regression (QA I1): a missing capacity matched whichever same-named project was closest to 0 MW."""
+    with db.session_scope() as s:
+        sync_records(s, [_rec("Seti Khola", 1.5, "powerplants", ProjectStatus.OPERATIONAL, district="Kaski"),
+                         _rec("Seti Khola", 22.0, "powerplants", ProjectStatus.OPERATIONAL, district="Tanahun")])
+    with db.session_scope() as s:
+        res = sync_records(s, [_rec("Seti Khola", None, "wikipedia", ProjectStatus.OPERATIONAL, district="Tanahun")])
+        assert res.created == 1 and res.updated == 0
+        assert sorted(p.capacity_mw for p in s.scalars(select(Project)) if p.capacity_mw) == [1.5, 22.0]
+
+
+def test_a_resync_does_not_overwrite_hand_corrected_values_or_their_provenance(db):
+    """Regression (QA I2): a DoED re-sync replaced manual corrections and reset the reliability tag to 'doed'."""
+    with db.session_scope() as s:
+        sync_records(s, [_rec("Baz Khola", 10.0, "generation", ProjectStatus.LICENSED, district="Ilam")])
+    with db.session_scope() as s:
+        p = s.scalars(select(Project)).one()
+        p.capacity_mw, p.data_reliability = 12.0, "manual"          # a person corrected the capacity
+        p.license_number = None
+    with db.session_scope() as s:                     # a DoED row that agrees still fills blanks
+        sync_records(s, [_rec("Baz Khola", 12.0, "generation", ProjectStatus.LICENSED, district="Ilam",
+                              license_number="77", license_type="Generation")])
+        assert s.scalars(select(Project)).one().license_number == "77"
+    with db.session_scope() as s:                     # a DoED row that disagrees must not overwrite the correction
+        res = sync_records(s, [_rec("Baz Khola", 10.4, "generation", ProjectStatus.LICENSED, district="Ilam")])
+        p = s.scalars(select(Project)).one()
+        assert res.created == 0 and p.capacity_mw == 12.0   # the correction survives the 10.4 DoED value
+        assert p.data_reliability == "manual"               # provenance is not downgraded
+        assert any("capacity_mw 12.0 vs 10.4" in c for c in res.conflicts)

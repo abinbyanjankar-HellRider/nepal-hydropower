@@ -131,6 +131,21 @@ def test_excel_export_endpoint(client):
     assert client.get("/api/export/excel?format=bogus").status_code == 400
 
 
+def test_excel_export_never_turns_data_into_formulas():
+    """Regression (QA): a scraped name such as '=HYPERLINK(...)' was written as a live formula in the data sheets."""
+    import pandas as pd
+    from openpyxl import Workbook
+    from src.exports.excel_builder import _write_sheet
+    wb = Workbook()
+    _write_sheet(wb, "Data", pd.DataFrame({"name": ["=HYPERLINK(\"http://evil\",\"x\")", "@SUM(1)", "+cmd", "Alpha"], "mw": [1.0, 2.0, 3.0, 4.0]}))
+    buf = io.BytesIO()
+    wb.save(buf)
+    ws = load_workbook(io.BytesIO(buf.getvalue()))["Data"]
+    assert ws["A2"].data_type == "s" and ws["A2"].value.startswith("=HYPERLINK")     # text, not a formula
+    assert ws["A3"].data_type == "s" and ws["A4"].data_type == "s" and ws["A5"].value == "Alpha"
+    assert ws["B2"].value == 1.0                                                      # numbers are untouched
+
+
 def test_json_never_contains_nan_or_infinity(db, client):
     """Regression: a listed company with zero paid-up capital produced `Infinity`, which broke the Companies page."""
     from src.collectors.nepse_scraper import sync_listed_companies

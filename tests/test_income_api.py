@@ -23,12 +23,48 @@ def test_forecast_endpoint_contract(client):
     r = client.get("/api/income/forecast")
     assert r.status_code == 200
     body = r.get_json()
-    assert set(body) == {"assumptions", "quarters", "totals", "companies"}
+    assert set(body) == {"assumptions", "quarters", "totals", "companies", "others"}
     assert len(body["quarters"]) == 4 and body["companies"][0]["rank"] == 1
     first = body["companies"][0]
     for key in ("wet_usage_pct", "dry_usage_pct", "avg_usage_pct", "annual_income_npr", "quarters", "calibration", "flags"):
         assert key in first
     json.dumps(body, allow_nan=False)           # no NaN/Infinity leaks into the JSON
+
+
+def test_forecast_endpoint_carries_tax_status_and_forecast_eps_and_book_value(client):
+    body = client.get("/api/income/forecast").get_json()
+    alpha = next(c for c in body["companies"] if c["symbol"] == "ALPHA")
+    for key in ("tax_status", "tax_rate_pct", "eps_reported", "eps_forecast", "bvps_reported", "bvps_forecast",
+                "net_profit_forecast", "forecast_flags"):
+        assert key in alpha
+    assert alpha["tax_status"] == "Taxed" and alpha["eps_forecast"] > alpha["eps_reported"]
+    assert body["assumptions"]["repay_pct"] == 8.0 and body["assumptions"]["retention_pct"] == 70.0
+
+
+def test_forecast_endpoint_takes_repayment_and_retention_controls(client):
+    flat = client.get("/api/income/forecast?repay_pct=0&retention_pct=0").get_json()
+    alpha = next(c for c in flat["companies"] if c["symbol"] == "ALPHA")
+    assert alpha["eps_forecast"] == pytest.approx(alpha["eps_reported"])        # no repayment, income = last year's sales
+    assert alpha["bvps_forecast"] == pytest.approx(alpha["bvps_reported"])      # nothing retained
+
+
+@pytest.mark.parametrize("query", ["repay_pct=-1", "repay_pct=51", "repay_pct=nan", "retention_pct=101",
+                                   "retention_pct=abc", "retention_pct=inf"])
+def test_forecast_endpoint_rejects_bad_controls(client, query):
+    r = client.get("/api/income/forecast?" + query)
+    assert r.status_code == 400 and r.get_json()["error"]
+
+
+def test_every_listed_company_appears_in_the_forecast_and_finance_endpoints(db, income_world):
+    from src.models import Company
+    with db.session_scope() as s:
+        s.add(Company(company_name="Gamma Power Ltd", nepse_listed=True, stock_symbol="GAMMA"))
+    app = create_app(db)
+    app.config["TESTING"] = True
+    c = app.test_client()
+    f = c.get("/api/income/forecast").get_json()
+    assert {x["symbol"] for x in f["companies"] + f["others"]} == {"ALPHA", "BETA", "GAMMA"}
+    assert {x["symbol"] for x in c.get("/api/finance/impact").get_json()["companies"]} == {"ALPHA", "BETA", "GAMMA"}
 
 
 def test_finance_endpoint_defaults_and_burden(client):
@@ -73,6 +109,14 @@ def test_income_page_has_the_sections_and_controls(client):
     for needle in ('id="kpis"', 'id="c-usage"', 'id="c-quarters"', 'id="rank"', 'id="fin-controls"',
                    'name="rate_delta_pp"', 'name="repay_pct"', 'name="retention_pct"', 'name="years"',
                    'id="fin"', 'id="plants"', "estimate"):
+        assert needle in html, needle
+
+
+def test_income_page_shows_tax_status_forecast_eps_book_value_and_says_what_the_forecast_is(client):
+    html = client.get("/income").get_data(as_text=True)
+    for needle in ("Tax status", "EPS reported → forecast", "Book value/share reported → forecast", 'id="tax-tally"',
+                   "All NEPSE-listed hydropower companies", "equals last year's reported sales", "no operating plant",
+                   "raw ×"):                       # a clipped calibration shows the unclipped factor too
         assert needle in html, needle
 
 

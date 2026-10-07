@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from .. import config
 from ..analytics import financials as fin
+from ..analytics import income
 from ..analytics import load_projects_df
 from ..analytics import ownership as own
 from ..analytics import technical as tech
@@ -64,7 +65,9 @@ def _write_sheet(wb: Workbook, title: str, df: pd.DataFrame, formats: dict[str, 
                 continue
             if hasattr(v, "item"):
                 v = v.item()
-            ws.cell(i, j, v)
+            cell = ws.cell(i, j, v)
+            if isinstance(v, str) and v.startswith("="):
+                cell.data_type = "s"  # scraped text is data, never a formula (openpyxl would store '=...' as one)
     for j, col in enumerate(df.columns, 1):
         fmt = (formats or {}).get(col)
         if fmt:
@@ -132,12 +135,10 @@ def _link_financial_formulas(ws, est: pd.DataFrame) -> None:
     Columns: A id, B name, C MW, D energy GWh, E tariff, F revenue (NPR m), G basis. Header is on row 3.
     Only cells that were derived from an assumption are linked; project-reported energy / PPA rates stay values.
     """
-    blended = fin.blended_tariff(config.ASSUMED_WET_TARIFF_NPR_PER_KWH, config.ASSUMED_DRY_TARIFF_NPR_PER_KWH,
-                                 config.ASSUMED_DRY_SEASON_ENERGY_SHARE)
     for i, row in enumerate(est.itertuples(index=False), 4):
         if str(row.basis).startswith("assumed"):
             ws.cell(i, 4, f"=C{i}*8.76*Assumptions!$B$6")
-        if abs(row.tariff_npr_kwh - round(blended, 2)) < 0.006:
+        if row.tariff_basis == "assumed":  # never tie a verified or recorded rate to the assumption just because it is equal
             ws.cell(i, 5, "=Assumptions!$B$7")
         ws.cell(i, 6, f"=D{i}*E{i}")
         for col in (4, 5, 6):
@@ -152,6 +153,7 @@ def build_workbook(kind: str = "master", db: DatabaseManager | None = None, out_
     out_dir.mkdir(parents=True, exist_ok=True)
     with db.session_scope() as s:
         flat = load_projects_df(s)
+        ppa_rates = income.load_ppa_rates(s)  # verified PPA rates price the revenue estimate, as on the /income page
         nepse = own.nepse_exposure(flat, s) if not flat.empty else pd.DataFrame()
         reported = pd.DataFrame([{
             "project_id": f.project_id, "fiscal_year": f.fiscal_year, "energy_gwh": f.energy_generated_gwh,
@@ -198,11 +200,11 @@ def build_workbook(kind: str = "master", db: DatabaseManager | None = None, out_
         _write_sheet(wb, "Commissioning", tech.commissioning_timeline(flat), {"mw_added": NUM_FORMATS["mw"],
                                                                               "cumulative_mw": NUM_FORMATS["mw"]})
     if kind in ("master", "financial"):
-        est = fin.estimate_revenue_df(flat)
+        est = fin.estimate_revenue_df(flat, rates=ppa_rates)
         _write_sheet(wb, "Financial", est.rename(columns={"est_revenue_npr_m": "est_revenue_npr_m (see Assumptions)"}),
                      {"capacity_mw": NUM_FORMATS["mw"], "est_energy_gwh": NUM_FORMATS["mw"]},
-                     note="ESTIMATES for operational plants (project energy where known, else assumed capacity factor). "
-                          "Not reported revenue.")
+                     note="ESTIMATES for operational plants (project energy where known, else assumed capacity factor; "
+                          "tariff_basis says whether a verified PPA rate or the assumed tariff was used). Not reported revenue.")
         _assumptions_sheet(wb)
         _link_financial_formulas(wb["Financial"], est)
         if not reported.empty:

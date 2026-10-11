@@ -10,3 +10,9 @@ data/reports/
 data/*.log
 data/stage*.sh
 exports/generated/
+
+# graphify: commit only the report, graph.json and graph.html
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/manifest.json
+graphify-out/cost.json

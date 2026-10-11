@@ -394,3 +394,14 @@ def test_headline_ppa_pair_comes_from_the_largest_plant_not_the_first_stored(pro
     with db.session_scope() as s:
         ppa = cp.build_profile(s, cid)["metrics"]["ppa_rate"]
     assert (ppa["wet"], ppa["dry"]) == (4.8, 8.4)
+
+
+def test_headline_profit_uses_newest_profit_row_even_without_balance_sheet(profile_db):
+    db, cid = profile_db
+    with db.session_scope() as s:
+        full = s.scalars(select(CompanyFinancial).where(CompanyFinancial.company_id == cid)).one()
+        s.add(CompanyFinancial(company_id=cid, fiscal_year=full.fiscal_year, quarter=full.quarter + 1, net_profit_npr=-5e6))
+    with db.session_scope() as s:
+        m = cp.build_profile(s, cid)["metrics"]
+    assert m["net_profit_latest_npr"] == -5e6 and f"Q{full.quarter + 1}" in m["net_profit_latest_period"]
+    assert m["loans_npr"] == 3e9  # balance-sheet figures still come from the last full report

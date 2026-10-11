@@ -101,6 +101,7 @@ def build_profile(session: Session, company_id: int) -> dict | None:
     news = list(session.scalars(select(ProjectUpdate).where(
         or_(ProjectUpdate.company_id == company_id, ProjectUpdate.project_id.in_(project_ids or [""])))))
     latest = _latest(fin_rows)
+    newest_profit = max((r for r in fin_rows if r.net_profit_npr is not None), key=lambda r: (r.fiscal_year, r.quarter), default=None)
     project_cost_facts: dict[str, CompanyFact] = {}
     for f in sorted([*facts, *linked_costs], key=lambda f: (f.verified, f.fiscal_year or "")):  # verified and newest win
         if f.fact_type == "project_cost_npr" and f.project_id:
@@ -200,6 +201,9 @@ def build_profile(session: Session, company_id: int) -> dict | None:
         "finance_cost_pct_of_sales": round(latest.finance_cost_npr / latest.electricity_sales_npr * 100, 1)
         if latest and latest.finance_cost_npr is not None and latest.electricity_sales_npr else None,
         "electricity_sales_npr": reported_revenue, "net_profit_npr": latest.net_profit_npr if latest else None,
+        # A profit-only announcement can be newer than the last full quarterly report; show it with its own period.
+        "net_profit_latest_npr": newest_profit.net_profit_npr if newest_profit else None,
+        "net_profit_latest_period": f"FY {newest_profit.fiscal_year} Q{newest_profit.quarter} (year to date)" if newest_profit else None,
         "paid_up_capital_npr": latest.paid_up_capital_npr if latest else None,
         "eps": latest.eps if latest else None, "networth_per_share": latest.networth_per_share if latest else None,
         "roe_pct": latest.roe_pct if latest else None, "roa_pct": latest.roa_pct if latest else None,

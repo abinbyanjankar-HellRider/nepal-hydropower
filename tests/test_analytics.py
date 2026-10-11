@@ -132,6 +132,7 @@ def test_irr_known_values():
     assert fin.irr([-100, 110]) == pytest.approx(0.10, abs=1e-6)
     assert fin.irr([-1000, 300, 300, 300, 300, 300]) == pytest.approx(0.1524, abs=1e-3)
     assert fin.irr([100, 100]) is None  # no outlay: undefined
+    assert fin.irr([-100, 500]) == pytest.approx(4.0, abs=1e-6)  # 400% return, above the old 100% bracket
     profile = fin.project_return_profile(1000, 100, life_years=35)
     assert profile["simple_payback_years"] == 10.0 and 9 < profile["irr_pct"] < 10
 

@@ -101,7 +101,7 @@ const dash = (v, f) => (v === null || v === undefined) ? "–" : f(v);
   row(t, "Debt / equity", dash(m.debt_to_equity, v => fmt(v, 2)), "loans / (paid-up capital + reserves)");
   row(t, "Finance cost / sales", dash(m.finance_cost_pct_of_sales, v => fmt(v, 1) + "%"));
   row(t, "Electricity sales", "NPR " + npr(m.electricity_sales_npr));
-  row(t, "Net profit", "NPR " + npr(m.net_profit_npr));
+  row(t, "Net profit", "NPR " + npr(m.net_profit_latest_npr ?? m.net_profit_npr), m.net_profit_latest_period);
   row(t, "EPS / net worth per share", dash(m.eps, v => fmt(v, 2)) + " / " + dash(m.networth_per_share, v => fmt(v, 2)));
   row(t, "ROE / ROA", dash(m.roe_pct, v => fmt(v, 1) + "%") + " / " + dash(m.roa_pct, v => fmt(v, 1) + "%"));
 

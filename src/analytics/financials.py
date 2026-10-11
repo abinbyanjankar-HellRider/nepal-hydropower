@@ -94,6 +94,9 @@ def irr(cashflows: list[float], lo: float = -0.99, hi: float = 1.0, tol: float =
     if not (any(c < 0 for c in cashflows) and any(c > 0 for c in cashflows)):
         return None
     f_lo, f_hi = npv(lo), npv(hi)
+    while f_lo * f_hi > 0 and hi < 1e4:  # widen the bracket for IRRs above 100%
+        hi *= 2
+        f_hi = npv(hi)
     if f_lo * f_hi > 0:
         return None
     for _ in range(200):

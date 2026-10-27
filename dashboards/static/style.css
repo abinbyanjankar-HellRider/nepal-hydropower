@@ -245,3 +245,24 @@ details.fold > summary:hover h2 { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- company-first home ---------- */
+.nav-group { margin: var(--s4) var(--s3) var(--s1); color: var(--faint); font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--s4); align-items: start; }
+@media (max-width: 1100px) { .home-grid { grid-template-columns: minmax(0, 1fr); } }
+.chips { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3); }
+.chip { min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
+        color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.chip:hover { background: var(--surface-2); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); font-weight: 600; }
+.search-box { width: 100%; min-height: 40px; margin-bottom: var(--s3); padding: 6px 12px; font: inherit; color: var(--text);
+              background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.more-btn { margin-top: var(--s3); min-height: 40px; padding: 6px 14px; font: inherit; font-weight: 500; cursor: pointer; color: var(--accent-strong);
+            background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
+.more-btn:hover { background: var(--surface-2); }
+.more-btn[hidden] { display: none; }
+.explore { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--s4); margin-top: var(--s4); }
+.explore a.card { color: var(--text); display: block; }
+.explore a.card:hover { border-color: var(--accent); text-decoration: none; }
+.explore h3 { margin: 0 0 var(--s1); color: var(--accent-strong); }
+.explore p { margin: 0; color: var(--muted); font-size: var(--fs-sm); }

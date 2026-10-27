@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import click
+import requests
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy import select
@@ -150,16 +151,34 @@ cli.add_command(sync, "scrape-doe")  # alias used in the original docs
 
 
 @cli.command("update-news")
-def update_news():
-    """Fetch hydropower news from RSS feeds and attach it to mentioned projects."""
+@click.option("--limit", default=30, show_default=True, help="Newest ShareSansar announcements to read per company.")
+def update_news(limit):
+    """Fetch company announcements (ShareSansar) and hydropower news (RSS) and attach them to companies and projects."""
+    from .collectors import sharesansar as ss
     from .collectors.news_scraper import attach_news, fetch_items
+    from .models import Company
     db_manager.init_db()
+    with db_manager.session_scope() as s:
+        targets = [(c.company_id, c.sharesansar_id) for c in s.scalars(
+            select(Company).where(Company.nepse_listed.is_(True), Company.sharesansar_id.isnot(None)))]
+    with console.status(f"Fetching ShareSansar announcements for {len(targets)} companies..."):
+        try:
+            found, failed = ss.fetch_announcements(targets, limit=limit)
+        except (requests.RequestException, RuntimeError) as exc:  # token page down: still do the RSS part below
+            console.print(f"[red]ShareSansar unavailable: {exc}[/red]")
+            found, failed = {}, [cid for cid, _ in targets]
+    with db_manager.session_scope() as s:
+        added = ss.store_announcements(s, found)
+    console.print(f"[green]ShareSansar:[/green] {sum(map(len, found.values()))} announcements read for {len(found)} companies, "
+                  f"{added} new" + (f", [red]{len(failed)} companies failed[/red]" if failed else ""))
     with console.status("Fetching feeds..."):
         items = fetch_items()
     with db_manager.session_scope() as s:
         result = attach_news(s, items)
     console.print(f"[green]News:[/green] {result['items']} relevant articles, "
                   f"{result['matched_items']} mention a known project, {result['updates_added']} updates added")
+    if failed and not found:
+        raise click.ClickException("ShareSansar announcements could not be fetched")
 
 
 @cli.command()

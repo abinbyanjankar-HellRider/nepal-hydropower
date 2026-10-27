@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from datetime import date
 
 import requests
 from bs4 import BeautifulSoup
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import config
-from ..models import Company, CompanyFinancial
+from ..models import Company, CompanyFinancial, ProjectUpdate, UpdateType
 
 log = logging.getLogger(__name__)
 BASE = "https://www.sharesansar.com"
@@ -242,3 +243,68 @@ def store_financials(session: Session, company: Company, result: dict) -> dict:
                source_url=url, **q)
         counts["quarterly"] = 1
     return counts
+
+
+# --- Company announcements (all categories: results, dividends, AGMs, allotments, bids, ...) --------------------------------
+
+FINANCIAL_RE = re.compile(r"net (?:profit|loss)|dividend|bonus share|right share|book closure|allot|IPO|rating|auction|debenture",
+                          re.I)
+
+
+def parse_announcements(payload: dict) -> list[dict]:
+    """Rows of the `company-announcements` DataTables response -> {title, url, date}. Rows without a link are dropped."""
+    out = []
+    for row in payload.get("data", []):
+        html = row.get("title") or ""
+        a = BeautifulSoup(html, "lxml").find("a")
+        title = (a.get_text(" ", strip=True) if a else re.sub(r"<[^>]+>", "", html)).strip()
+        url = a["href"] if a and a.get("href") else (f"{BASE}/announcementdetail/{row['slug']}" if row.get("slug") else None)
+        try:
+            day = date.fromisoformat((row.get("published_date") or "")[:10])
+        except ValueError:
+            continue
+        if title and url:
+            out.append({"title": title, "url": url, "date": day})
+    return out
+
+
+def fetch_announcements(companies: list[tuple[int, int]], limit: int = 30, client: ShareSansarClient | None = None
+                        ) -> tuple[dict[int, list[dict]], list[int]]:
+    """Newest `limit` announcements for each (company_id, sharesansar_id). One page load supplies the CSRF token for all.
+
+    Returns ({company_id: rows}, [company_ids whose request failed]); one company failing never stops the rest."""
+    client = client or ShareSansarClient()
+    _, token = client._company_page("nhpc")  # any company page works; the token belongs to the session, not the company
+    headers = {"X-CSRF-Token": token, "X-Requested-With": "XMLHttpRequest", "Referer": f"{BASE}/company/nhpc"}
+    found: dict[int, list[dict]] = {}
+    failed: list[int] = []
+    for company_id, ss_id in companies:
+        time.sleep(POLITE_DELAY)
+        try:
+            r = client.s.post(f"{BASE}/company-announcements", headers=headers, timeout=config.REQUEST_TIMEOUT,
+                              data={"draw": 1, "start": 0, "length": limit, "company": ss_id})
+            r.raise_for_status()
+            found[company_id] = parse_announcements(r.json())
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("announcements for ShareSansar company %s failed: %s", ss_id, exc)
+            failed.append(company_id)
+    return found, failed
+
+
+def store_announcements(session: Session, found: dict[int, list[dict]]) -> int:
+    """Insert announcements not yet stored for that company (matched by URL). Returns rows added."""
+    ids = list(found)
+    existing = {(u.company_id, u.source_url) for u in session.scalars(
+        select(ProjectUpdate).where(ProjectUpdate.company_id.in_(ids)))} if ids else set()
+    added = 0
+    for company_id, rows in found.items():
+        for r in rows:
+            if (company_id, r["url"]) in existing:
+                continue
+            session.add(ProjectUpdate(
+                company_id=company_id, update_date=r["date"], title=r["title"][:300], source_url=r["url"],
+                update_type=UpdateType.FINANCIAL if FINANCIAL_RE.search(r["title"]) else UpdateType.NEWS,
+                source_name="ShareSansar announcement"))
+            existing.add((company_id, r["url"]))
+            added += 1
+    return added

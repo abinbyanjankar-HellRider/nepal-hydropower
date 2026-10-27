@@ -2,7 +2,7 @@
 {% block title %}News · Nepal Hydropower{% endblock %}
 {% block content %}
 <h1>News</h1>
-<p class="sub">From Online Khabar, The Rising Nepal and Kathmandu Post RSS feeds, matched by name to tracked projects and to NEPSE-listed hydropower companies (by company name or stock symbol). Run <code>python main.py update-news</code> to refresh. Not comprehensive — only what these feeds published and this matching could identify.</p>
+<p class="sub">Company announcements are read straight from ShareSansar (results, dividends, AGMs, allotments, bids); hydropower news comes from Online Khabar, The Rising Nepal and Kathmandu Post RSS feeds, matched by name to tracked projects and NEPSE-listed companies. Both update with <code>python main.py refresh</code> or <code>python main.py update-news</code>. RSS matching is not comprehensive.</p>
 <form class="filters" id="f">
   <label>Search<input name="q" placeholder="title, project or company"></label>
 </form>
@@ -12,7 +12,7 @@
     <ul class="news" id="project-news"></ul>
   </div>
   <div class="card">
-    <h2>NEPSE-listed company news</h2>
+    <h2>NEPSE-listed company news &amp; announcements</h2>
     <ul class="news" id="company-news"></ul>
   </div>
 </div>

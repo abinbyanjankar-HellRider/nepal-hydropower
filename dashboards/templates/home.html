@@ -1,61 +1,128 @@
 {% extends "base.html" %}
-{% block title %}Overview · Nepal Hydropower{% endblock %}
+{% block title %}Home · Nepal Hydropower{% endblock %}
 {% block content %}
-<h1>Nepal hydropower overview</h1>
-<p class="sub">Projects from DoED licence registers, cross-checked against Wikipedia. Capacity is licensed/installed MW as reported by the source.</p>
+<h1>Nepal hydropower companies</h1>
+<p class="sub">Find a listed company, see how it is doing, and read its latest announcements. Pick a company for full details.</p>
 
-<div class="grid kpis" id="kpis"></div>
+<div class="grid kpis" id="kpis" aria-live="polite"></div>
 
-<div class="grid two">
-  <div class="card"><h2>Capacity by stage (MW)</h2><div class="chart-box"><canvas id="c-status"></canvas></div></div>
-  <div class="card"><h2>Operational capacity by province (MW)</h2><div class="chart-box"><canvas id="c-province"></canvas></div></div>
-  <div class="card"><h2>Operational capacity added per year (MW) and cumulative</h2><div class="chart-box"><canvas id="c-timeline"></canvas></div></div>
-  <div class="card"><h2>Largest operational plants (MW)</h2><div class="chart-box"><canvas id="c-top"></canvas></div></div>
+<div class="home-grid">
+  <section class="card" aria-labelledby="h-companies">
+    <h2 id="h-companies">Companies</h2>
+    <input class="search-box" id="q" type="search" placeholder="Search by name or symbol" aria-label="Search companies">
+    <div class="chips" role="group" aria-label="Quick filters">
+      <button class="chip" type="button" data-f="all" aria-pressed="true">All</button>
+      <button class="chip" type="button" data-f="operating" aria-pressed="false">Operating plants</button>
+      <button class="chip" type="button" data-f="building" aria-pressed="false">Building</button>
+      <button class="chip" type="button" data-f="taxfree" aria-pressed="false">Tax-free now</button>
+      <button class="chip" type="button" data-f="ppa" aria-pressed="false">PPA rate known</button>
+    </div>
+    <div id="count" class="sub" style="margin-bottom:8px"></div>
+    <div id="table"></div>
+    <button class="more-btn" id="more" type="button" hidden></button>
+  </section>
+
+  <section class="card" aria-labelledby="h-news">
+    <h2 id="h-news">Latest announcements</h2>
+    <div class="chips" role="group" aria-label="Announcement filter">
+      <button class="chip" type="button" data-n="all" aria-pressed="true">All</button>
+      <button class="chip" type="button" data-n="fin" aria-pressed="false">Results &amp; dividends</button>
+    </div>
+    <ul class="news" id="news"></ul>
+    <p style="margin:12px 0 0"><a href="/news">See all news &amp; announcements →</a></p>
+  </section>
 </div>
 
-<div class="card" style="margin-top:16px"><h2>Latest news mentioning tracked projects</h2><ul class="news" id="news"></ul></div>
+<div class="explore" aria-label="Explore more">
+  <a class="card" href="/income"><h3>Income &amp; finance</h3><p>Forecast income, loans and finance cost per company.</p></a>
+  <a class="card" href="/overview"><h3>Project overview</h3><p>Capacity by stage, province and year across all projects.</p></a>
+  <a class="card" href="/map"><h3>Map</h3><p>Where every project is located.</p></a>
+  <a class="card" href="/projects"><h3>All projects</h3><p>Search and filter 800+ projects.</p></a>
+</div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 <script>
+const SHOW = 15;
+let companies = [], news = [], filter = "all", newsFilter = "all", expanded = false, sortKey = "operational_mw", sortDir = "desc";
+const q = document.getElementById("q");
+
+const FILTERS = {
+  all: () => true,
+  operating: r => r.operational_mw > 0,
+  building: r => r.construction_mw > 0,
+  taxfree: r => /tax-free/i.test(r.tax || ""),
+  ppa: r => r.ppa_rate !== null && r.ppa_rate !== undefined,
+};
+const cols = [
+  { label: "Symbol", sort: "symbol", render: r => r.symbol ? el("span", { class: "sym" }, r.symbol) : "–" },
+  { label: "Company", sort: "name", render: r => el("a", { href: "/companies/" + r.company_id }, r.name) },
+  { label: "Operating MW", num: true, sort: "operational_mw", render: r => fmt(r.operational_mw, 1) },
+  { label: "PPA (NPR/kWh)", num: true, sort: "ppa_rate", render: r => r.ppa_text ? el("span", { title: r.ppa_text }, fmt(r.ppa_rate, 2)) : "–" },
+  { label: "Tax", sort: "tax", render: r => r.tax || "Unknown" },
+  { label: "Profit vs last year", num: true, sort: "profit_yoy_pct", render: r => (r.profit_yoy_pct === null || r.profit_yoy_pct === undefined) ? "–" :
+      signedPct(r.profit_yoy_pct, "Year-to-date net profit, " + r.latest_period + ", vs the same period last year") },
+];
+
+function drawCompanies() {
+  const t = q.value.trim().toLowerCase();
+  const view = companies.filter(r => FILTERS[filter](r) && (!t || (r.name + " " + (r.symbol || "")).toLowerCase().includes(t)));
+  view.sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x === null || x === undefined) return 1;
+    if (y === null || y === undefined) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * (sortDir === "asc" ? 1 : -1);
+  });
+  const all = expanded || !!t;
+  const shown = all ? view : view.slice(0, SHOW);
+  document.getElementById("count").textContent = shown.length < view.length ? `Showing ${shown.length} of ${view.length} companies` : `${view.length} companies`;
+  renderTable(document.getElementById("table"), cols, shown, { sortKey, sortDir, empty: "No matching companies.",
+    onSort: k => { sortDir = (sortKey === k && sortDir === "desc") ? "asc" : "desc"; sortKey = k; drawCompanies(); } });
+  const more = document.getElementById("more");
+  more.hidden = !!t || view.length <= SHOW;
+  more.textContent = expanded ? "Show fewer" : `Show all ${view.length} companies`;
+}
+
+function drawNews() {
+  const list = document.getElementById("news");
+  list.replaceChildren();
+  const rows = news.filter(n => newsFilter === "all" || n.type === "Financial").slice(0, 12);
+  if (!rows.length) { list.append(el("li", { class: "empty" }, "No announcements yet. Run `python main.py update-news`.")); return; }
+  rows.forEach(n => list.append(el("li", {},
+    el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title), " ",
+    el("small", {}, n.date + " · "),
+    n.company_id ? companyLink(n.company_id, n.company_symbol || n.company) : null)));
+}
+
+function kpi(label, value, note) {
+  return el("div", { class: "card kpi" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value), el("div", { class: "note" }, note));
+}
+function drawKpis() {
+  const since = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
+  document.getElementById("kpis").replaceChildren(
+    kpi("Listed companies", fmt(companies.length), "NEPSE hydropower"),
+    kpi("Operating capacity", fmt(companies.reduce((s, r) => s + (r.operational_mw || 0), 0)) + " MW", "owned by listed companies"),
+    kpi("PPA rate known", fmt(companies.filter(FILTERS.ppa).length), "verified from a report"),
+    kpi("New announcements", fmt(news.filter(n => n.date >= since).length), "in the last 14 days"));
+}
+
+document.querySelectorAll("[data-f]").forEach(b => b.addEventListener("click", () => {
+  filter = b.dataset.f; expanded = false;
+  document.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  drawCompanies();
+}));
+document.querySelectorAll("[data-n]").forEach(b => b.addEventListener("click", () => {
+  newsFilter = b.dataset.n;
+  document.querySelectorAll("[data-n]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  drawNews();
+}));
+document.getElementById("more").addEventListener("click", () => { expanded = !expanded; drawCompanies(); });
+q.addEventListener("input", drawCompanies);
+
 (async () => {
-  try {
-    const s = await api("/api/projects/statistics");
-    const sm = s.summary;
-    const kpi = (label, value, note, color) => el("div", { class: "card kpi" },
-      el("div", { class: "label" }, color ? el("span", { class: "dot", style: "background:" + color }) : null, label),
-      el("div", { class: "value" }, value), el("div", { class: "note" }, note || ""));
-    document.getElementById("kpis").append(
-      kpi("Operational", fmt(sm.operational_mw) + " MW", fmt(sm.operational_projects) + " plants", STATUS_COLORS["Operational"]),
-      kpi("Under construction", fmt(sm.under_construction_mw) + " MW", "per Wikipedia list", STATUS_COLORS["Under Construction"]),
-      kpi("Licensed", fmt(sm.licensed_mw) + " MW", "generation licence, construction not confirmed", STATUS_COLORS["Licensed"]),
-      kpi("Planned", fmt(sm.planned_mw) + " MW", "survey licence / proposals", STATUS_COLORS["Planned"]),
-      kpi("Projects tracked", fmt(sm.projects), "all stages"));
-
-    new Chart("c-status", { type: "doughnut",
-      data: { labels: s.by_status.map(r => r.group), datasets: [{ data: s.by_status.map(r => r.total_mw),
-              backgroundColor: s.by_status.map(r => STATUS_COLORS[r.group] || "#999") }] },
-      options: baseChartOptions({ plugins: { legend: { position: "right" } } }) });
-    new Chart("c-province", { type: "bar",
-      data: { labels: s.operational_by_province.map(r => r.group), datasets: [{ data: s.operational_by_province.map(r => r.total_mw), backgroundColor: STATUS_COLORS["Operational"] }] },
-      options: baseChartOptions({ plugins: { legend: { display: false } } }) });
-    new Chart("c-timeline", { data: { labels: s.timeline.map(r => r.year), datasets: [
-        { type: "bar", label: "MW added", data: s.timeline.map(r => r.mw_added), backgroundColor: STATUS_COLORS["Operational"], yAxisID: "y" },
-        { type: "line", label: "Cumulative MW", data: s.timeline.map(r => r.cumulative_mw), borderColor: cssVar("--accent-strong"), backgroundColor: cssVar("--accent-strong"), yAxisID: "y1", pointRadius: 0, borderWidth: 2 }] },
-      options: baseChartOptions({ scales: { y: { position: "left" }, y1: { position: "right", grid: { drawOnChartArea: false } } } }) });
-    new Chart("c-top", { type: "bar",
-      data: { labels: s.top_operational.map(r => r.name), datasets: [{ data: s.top_operational.map(r => r.capacity_mw), backgroundColor: STATUS_COLORS["Operational"] }] },
-      options: baseChartOptions({ indexAxis: "y", plugins: { legend: { display: false } } }) });
-  } catch (e) { showError(document.getElementById("kpis"), e); }
-
-  const news = document.getElementById("news");
-  try {
-    const items = await api("/api/news");
-    if (!items.length) news.append(el("li", { class: "empty" }, "No news yet. Run `python main.py update-news`."));
-    items.slice(0, 8).forEach(n => news.append(el("li", {},
-      el("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title), " ",
-      el("small", {}, `${n.source} · ${n.date} · `), projectLink(n.project_id, n.project))));
-  } catch (e) { news.append(el("li", { class: "empty" }, "Could not load news.")); }
+  const [c, n] = await Promise.allSettled([api("/api/companies/profiles", { scope: "listed" }), api("/api/news", { scope: "companies", limit: 200 })]);
+  if (c.status === "fulfilled") companies = c.value; else showError(document.getElementById("table"), c.reason);
+  if (n.status === "fulfilled") news = n.value; else document.getElementById("news").append(el("li", { class: "empty" }, "Could not load announcements."));
+  drawKpis(); drawCompanies(); if (n.status === "fulfilled") drawNews();
 })();
 </script>
 {% endblock %}

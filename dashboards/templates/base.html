@@ -16,9 +16,10 @@
 </head>
 <body>
 {% set icons = url_for('static', filename='vendor/icons.svg') %}
-{% set nav = [('/', 'Overview', 'layout-dashboard'), ('/map', 'Map', 'map'), ('/projects', 'Projects', 'table-2'),
-              ('/companies', 'Companies', 'building-2'), ('/income', 'Income & finance', 'chart-column'),
-              ('/news', 'News', 'newspaper'), ('/analytics', 'Analytics', 'chart-column')] %}
+{% set nav = [(None, [('/', 'Home', 'layout-dashboard'), ('/companies', 'Companies', 'building-2'),
+                      ('/news', 'News & announcements', 'newspaper'), ('/income', 'Income & finance', 'chart-column')]),
+              ('Project database', [('/overview', 'Project overview', 'chart-column'), ('/projects', 'All projects', 'table-2'),
+                                    ('/map', 'Map', 'map'), ('/analytics', 'Analytics', 'chart-column')])] %}
 <a class="skip-link" href="#main">Skip to main content</a>
 <div class="shell">
   <aside class="sidebar" id="sidebar">
@@ -32,11 +33,14 @@
       </button>
     </div>
     <nav id="primary-nav" class="nav" aria-label="Primary">
-      {% for href, label, icon in nav %}
+      {% for group, links in nav %}
+      {% if group %}<p class="nav-group">{{ group }}</p>{% endif %}
+      {% for href, label, icon in links %}
       {% set active = request.path == href or (href != '/' and request.path.startswith(href)) %}
       <a href="{{ href }}" class="nav-link{{ ' active' if active }}"{{ ' aria-current="page"'|safe if active }}>
         <svg class="icon" aria-hidden="true"><use href="{{ icons }}#i-{{ icon }}"/></svg><span>{{ label }}</span>
       </a>
+      {% endfor %}
       {% endfor %}
       <div class="nav-foot">
         <button type="button" class="nav-link theme-toggle" id="theme-toggle" aria-label="Switch colour theme">

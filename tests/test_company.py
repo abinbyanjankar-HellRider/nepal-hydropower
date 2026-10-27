@@ -405,3 +405,39 @@ def test_headline_profit_uses_newest_profit_row_even_without_balance_sheet(profi
         m = cp.build_profile(s, cid)["metrics"]
     assert m["net_profit_latest_npr"] == -5e6 and f"Q{full.quarter + 1}" in m["net_profit_latest_period"]
     assert m["loans_npr"] == 3e9  # balance-sheet figures still come from the last full report
+
+
+def test_parse_and_store_announcements_is_idempotent(db):
+    from src.models import Company, ProjectUpdate, UpdateType
+    payload = {"data": [
+        {"title": "<a href='https://www.sharesansar.com/announcementdetail/x-1'>X Ltd has posted a net profit of Rs 5 million.</a>",
+         "slug": "x-1", "published_date": "2026-08-16"},
+        {"title": "X Ltd has published its 29th AGM notice.", "slug": "x-2", "published_date": "2026-07-31"},  # no <a>: URL from slug
+        {"title": "<a href='/bad'>bad date</a>", "slug": "x-3", "published_date": ""}]}
+    rows = ss.parse_announcements(payload)
+    assert [r["url"] for r in rows] == ["https://www.sharesansar.com/announcementdetail/x-1",
+                                        "https://www.sharesansar.com/announcementdetail/x-2"]
+    with db.session_scope() as s:
+        c = Company(company_name="X Ltd", nepse_listed=True, stock_symbol="XL", sharesansar_id=9)
+        s.add(c)
+        s.flush()
+        cid = c.company_id
+        assert ss.store_announcements(s, {cid: rows}) == 2
+        s.flush()
+        assert ss.store_announcements(s, {cid: rows}) == 0  # second run adds nothing
+        kinds = {u.source_url[-3:]: u.update_type for u in s.query(ProjectUpdate)}
+        assert kinds == {"x-1": UpdateType.FINANCIAL, "x-2": UpdateType.NEWS}
+
+
+def test_fetch_announcements_survives_one_company_failing(monkeypatch):
+    class Resp:
+        def __init__(self, ok): self.ok = ok
+        def raise_for_status(self):
+            if not self.ok: raise ss.requests.HTTPError("500")
+        def json(self): return {"data": [{"title": "T", "slug": "t", "published_date": "2026-01-02"}]}
+    class Client:
+        s = type("S", (), {"post": staticmethod(lambda url, data, **kw: Resp(data["company"] != 2))})()
+        def _company_page(self, symbol): return "", "tok"
+    monkeypatch.setattr(ss, "POLITE_DELAY", 0)
+    found, failed = ss.fetch_announcements([(10, 1), (20, 2)], client=Client())
+    assert list(found) == [10] and failed == [20]

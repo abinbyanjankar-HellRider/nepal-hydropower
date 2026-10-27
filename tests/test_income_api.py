@@ -124,3 +124,10 @@ def test_income_page_shows_the_profit_shape_indicator(client):
     """Spec section 1: the shape check is reported on the page, not only in the API."""
     html = client.get("/income").get_data(as_text=True)
     assert "Profit-shape gap" in html and "profit_shape_gap_pp" in html
+
+
+def test_home_is_company_first_and_project_charts_moved_to_overview(client):
+    home, overview = client.get("/"), client.get("/overview")
+    assert home.status_code == overview.status_code == 200
+    assert b"Latest announcements" in home.data and b'id="c-status"' not in home.data
+    assert b'id="c-status"' in overview.data and b'href="/overview"' in home.data

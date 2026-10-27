@@ -113,7 +113,11 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
     # ------------------------------------------------------------------------------- pages
     @app.get("/")
     def home():
-        return render_template("home.html", statuses=STATUSES)
+        return render_template("home.html")
+
+    @app.get("/overview")
+    def overview():
+        return render_template("overview.html", statuses=STATUSES)
 
     @app.get("/map")
     def map_page():
@@ -326,7 +330,7 @@ def create_app(db: DatabaseManager | None = None) -> Flask:
                 stmt = stmt.where(ProjectUpdate.company_id.isnot(None))
             rows = s.scalars(stmt.limit(limit)).all()
             return jsonify([{"date": _clean(u.update_date), "title": u.title, "source": u.source_name,
-                             "url": u.source_url, "project_id": u.project_id,
+                             "url": u.source_url, "type": u.update_type.value, "project_id": u.project_id,
                              "project": u.project.project_name_en if u.project else None,
                              "company_id": u.company_id,
                              "company": (u.company.listed_name or u.company.company_name) if u.company else None,
